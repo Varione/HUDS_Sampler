@@ -72,7 +72,14 @@ def apply_target_normalization(y: Any, out_stats: dict[str, float]) -> Any:
     return (y - float(out_stats["mean"])) / std_value
 
 
-def train_step(model: ResidualMLP, train_loader: DataLoader, val_loader: DataLoader, config: Any, device: torch.device | str) -> dict[str, float]:
+def train_step(
+    model: ResidualMLP, 
+    train_loader: DataLoader, 
+    val_loader: DataLoader, 
+    config: Any, 
+    device: torch.device | str, 
+    normalization_stats: dict[str, Any] | None = None  # FIX 5: Pass normalization for physical unit metrics
+) -> dict[str, float]:
     start_time = time.perf_counter()
     device = torch.device(device)
     model.to(device)
@@ -104,7 +111,17 @@ def train_step(model: ResidualMLP, train_loader: DataLoader, val_loader: DataLoa
             train_sample_count += batch_size
 
         train_loss = train_loss_sum / train_sample_count if train_sample_count else 0.0
-        val_loss, val_metrics = _evaluate_model(model, val_loader, loss_fn, config.model.output_names, device)
+        
+        # FIX 5: Pass normalization stats to evaluation for physical unit metrics
+        val_loss, val_metrics = _evaluate_model(
+            model, 
+            val_loader, 
+            loss_fn, 
+            config.model.output_names, 
+            device,
+            normalization=normalization_stats
+        )
+        
         epoch_metrics = {
             "step": float(getattr(config, "current_step", 0)),
             "epoch": float(epoch),
@@ -113,9 +130,21 @@ def train_step(model: ResidualMLP, train_loader: DataLoader, val_loader: DataLoa
             "val_r2_avg": float(val_metrics.get("r2_avg", 0.0)),
             "elapsed_s": float(time.perf_counter() - start_time),
         }
+        
+        # Record normalized metrics (always present)
         for output_name in config.model.output_names:
             epoch_metrics[f"val_r2_{output_name}"] = float(val_metrics.get(f"r2_{output_name}", 0.0))
             epoch_metrics[f"val_rmse_{output_name}"] = float(val_metrics.get(f"rmse_{output_name}", 0.0))
+            
+        # FIX 5: Record physical unit metrics if available (RMSE/MAE in original scale)
+        for output_name in config.model.output_names:
+            physical_rmse_key = f"val_rmse_{output_name}_physical"
+            physical_mae_key = f"val_mae_{output_name}_physical"
+            
+            if physical_rmse_key in val_metrics:
+                epoch_metrics[physical_rmse_key] = float(val_metrics.get(physical_rmse_key))
+            if physical_mae_key in val_metrics:
+                epoch_metrics[physical_mae_key] = float(val_metrics.get(physical_mae_key))
 
         latest_path = getattr(config, "latest_checkpoint_path", None)
         if latest_path is not None:
@@ -124,7 +153,7 @@ def train_step(model: ResidualMLP, train_loader: DataLoader, val_loader: DataLoa
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_without_improvement = 0
-            best_metrics = epoch_metrics
+            best_metrics = epoch_metrics.copy()
             best_path = getattr(config, "best_checkpoint_path", None)
             if best_path is not None:
                 _save_checkpoint(model, optimizer, epoch_metrics, Path(best_path))
@@ -140,6 +169,7 @@ def train_model(run_dir: str | Path, config: Any) -> dict[str, float]:
     """Train the surrogate model.
     
     FIX 2: Load existing checkpoint before training (unless retrain_from_scratch is True).
+    FIX 5: Pass normalization stats to evaluation for physical unit metrics reporting.
     """
     run_path = ensure_run_dir(str(run_dir))
     datasets_dir = run_path / "datasets"
@@ -193,7 +223,8 @@ def train_model(run_dir: str | Path, config: Any) -> dict[str, float]:
         except Exception as e:
             print(f"Warning: Failed to load checkpoint ({e}), training from scratch")
     
-    metrics = train_step(model, train_loader, val_loader, config, device)
+    # FIX 5: Pass normalization stats so evaluation can compute physical unit metrics
+    metrics = train_step(model, train_loader, val_loader, config, device, normalization_stats=normalization)
 
     metrics_path = metrics_dir / "training_metrics.csv"
     append_csv(pd.DataFrame([metrics]), metrics_path)
@@ -201,7 +232,20 @@ def train_model(run_dir: str | Path, config: Any) -> dict[str, float]:
     return metrics
 
 
-def _evaluate_model(model: torch.nn.Module, val_loader: DataLoader, loss_fn: torch.nn.Module, output_names: list[str], device: torch.device) -> tuple[float, dict[str, float]]:
+def _evaluate_model(
+    model: torch.nn.Module, 
+    val_loader: DataLoader, 
+    loss_fn: torch.nn.Module, 
+    output_names: list[str], 
+    device: torch.device,
+    normalization: dict[str, Any] | None = None  # FIX 5: Optional normalization stats for denormalization
+) -> tuple[float, dict[str, float]]:
+    """Evaluate model on validation set.
+    
+    FIX 5: When normalization stats are provided, compute metrics in both normalized 
+    and physical unit spaces (RMSE/MAE). Normalized loss is always returned for 
+    optimization tracking since R² is scale-invariant.
+    """
     model.eval()
     loss_sum = 0.0
     sample_count = 0
@@ -221,9 +265,48 @@ def _evaluate_model(model: torch.nn.Module, val_loader: DataLoader, loss_fn: tor
             y_pred_batches.append(predictions.cpu().numpy())
 
     val_loss = loss_sum / sample_count if sample_count else 0.0
+    
     if not y_true_batches:
         return val_loss, compute_metrics(np.empty((0, len(output_names))), np.empty((0, len(output_names))), output_names)
-    return val_loss, compute_metrics(np.vstack(y_true_batches), np.vstack(y_pred_batches), output_names)
+    
+    y_true_norm = np.vstack(y_true_batches)
+    y_pred_norm = np.vstack(y_pred_batches)
+    
+    # Always compute normalized metrics first (for loss tracking and R² which is scale-invariant)
+    metrics = compute_metrics(y_true_norm, y_pred_norm, output_names)
+    
+    # FIX 5: If normalization stats available, denormalize predictions and compute physical unit metrics
+    if normalization and "outputs" in normalization:
+        output_stats = normalization["outputs"]
+        
+        # Denormalize predictions to physical units for RMSE/MAE reporting
+        y_true_physical = np.zeros_like(y_pred_norm)
+        y_pred_physical = np.zeros_like(y_pred_norm)
+        
+        for i, name in enumerate(output_names):
+            if name in output_stats:
+                mean_val = float(output_stats[name]["mean"])
+                std_val = float(output_stats[name]["std"])
+                # Only denormalize if we have valid stats (avoid division by zero)
+                if std_val > 0:
+                    y_pred_physical[:, i] = y_pred_norm[:, i] * std_val + mean_val
+                    y_true_physical[:, i] = y_true_norm[:, i] * std_val + mean_val
+        
+        # Compute physical unit metrics and add to results with _physical suffix
+        for i, name in enumerate(output_names):
+            if name in output_stats:
+                mean_val = float(output_stats[name]["mean"])
+                std_val = float(output_stats[name]["std"])
+                if std_val > 0:
+                    # Physical RMSE (meaningful absolute error)
+                    physical_rmse = np.sqrt(np.mean((y_true_physical[:, i] - y_pred_physical[:, i]) ** 2))
+                    metrics[f"val_rmse_{name}_physical"] = float(physical_rmse)
+                    
+                    # Physical MAE  
+                    physical_mae = np.mean(np.abs(y_true_physical[:, i] - y_pred_physical[:, i]))
+                    metrics[f"val_mae_{name}_physical"] = float(physical_mae)
+    
+    return val_loss, metrics
 
 
 def _make_arrays(df: pd.DataFrame, var_cols: list[str], out_cols: list[str], normalization: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:

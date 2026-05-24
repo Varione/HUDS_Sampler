@@ -4,9 +4,9 @@ A file-based command-line tool for iterative surrogate model training using Hybr
 
 ## Overview
 
-The HUDS Active Learning App orchestrates a human-in-the-loop workflow for building high-fidelity surrogate models. It generates stratified sampling pools from user-defined parameter ranges, exports batches of configurations for external simulation, imports labeled results, trains neural network surrogates with Monte Carlo dropout uncertainty estimation, and selects the most informative new training samples using hybrid uncertainty metrics (entropy + variance).
+The HUDS Active Learning App orchestrates a human-in-the-loop workflow for building high-fidelity surrogate models. It generates stratified sampling pools from user-defined parameter ranges, exports batches of configurations for external simulation, imports labeled results, trains neural network surrogates with Monte Carlo dropout uncertainty estimation, and selects the most informative new training samples using hybrid uncertainty-driven data selection (HUDS).
 
-The workflow is entirely file-based and stateless. Each command reads from disk, performs its task, and writes results back to a run directory. This design enables seamless integration with external simulation tools and supports checkpointing at every step.
+The workflow is file-based with persistent state tracking. Each command reads/writes CSV files and updates `state.json` to track progress through the active learning cycle. This design enables seamless integration with external simulation tools while maintaining checkpointing at every step for resumable workflows.
 
 ## Important Note
 
@@ -343,10 +343,16 @@ Computes regression metrics (MSE, MAE, R2) per output variable and prints a summ
 
 **Error: No labeled training data found.** You must complete at least one full cycle of export-initial-train, simulate externally, and import-labels before running `huds-app train`.
 
-**Sampling returns identical results every run.** Check that your configuration has `model.dropout > 0`. HUDS variance estimation requires dropout to produce stochastic forward passes. With dropout set to 0, the hybrid uncertainty collapses to entropy-only selection.
+**Sampling returns identical results every run.** Check that your configuration has `model.dropout > 0`. HUDS uses MC Dropout variance for uncertainty estimation—without dropout layers, the model produces deterministic predictions with zero variance, and sampling degrades to pure diversity-based selection (KMeans clustering only).
 
 **CUDA out of memory during training or sampling.** Reduce `training.batch_size` and `huds.batch_size` in your configuration. For large models, consider reducing `model.hidden_dim` or `model.residual_blocks`. Set `training.device` to `"cpu"` as a fallback.
 
 **FAISS import error during sampling.** FAISS is an optional dependency. Either install it with `pip install faiss-cpu` or set `huds.use_faiss` to `false` in your configuration.
 
-**Imported labels do not match any request samples.** Ensure the `sample_id` column in your simulator output CSV exactly matches the sample IDs from the corresponding request file. The app joins on this column and silently skips unmatched rows.
+**Imported labels do not match any request samples.** The app validates that every `sample_id` in your simulator output CSV matches a sample from the corresponding request file. If IDs don't match, import fails with an error listing unknown sample IDs. To allow partial imports (when some simulations fail), use `--allow-partial` flag:
+
+```bash
+huds-app import-labels --run <dir> --kind train --step N --input sim_output.csv --allow-partial
+```
+
+Without this flag, the app enforces complete label coverage to prevent silent data corruption from missing simulator results.
