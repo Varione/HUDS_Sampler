@@ -367,11 +367,94 @@ class TestCLICommands:
         )
         
         assert count == 5
-        
+
         state = RunState.load(run_dir)
-        # Partial imports should mark status as 'partial', not 'labeled'  
+        # Partial imports should mark status as 'partial', not 'labeled'
         assert state.train_requests["0"]["status"] == "partial", \
             f"Partial import marked as labeled instead of partial (FIX 3 regression)"
+
+
+class TestCumulativePartialImport:
+    """Test that multiple partial imports correctly accumulate and clear pending IDs."""
+
+    def test_cumulative_partial_clears_all_pending(self, run_dir, test_config):
+        """P2 FIX: Two partial imports completing a step should clear ALL requested IDs from pending.
+
+        Regression test for the bug where only the last batch's imported_ids were removed
+        from pending_sample_ids, leaving earlier partial import IDs stuck in pending forever.
+        """
+        # Setup: init and export step 1 request with exactly 5 samples
+        pool_df = create_candidate_pool(test_config)
+        train_df, valid_df = split_pool(pool_df, test_config, test_config.random_seed)
+        ensure_run_dir(run_dir)
+        save_pool_files(pool_df, train_df, valid_df, run_dir)
+
+        from dataclasses import asdict
+        with open(f"{run_dir}/config.json", "w") as f:
+            __import__("json").dump(asdict(test_config), f)
+
+        state = RunState(run_dir=run_dir)
+        state.save()
+
+        # Export initial train request (step 0) - use small size for test
+        test_config.training.initial_train_size = 5
+        export_initial_train_request(run_dir, test_config)
+
+        request_df = read_csv(f"{run_dir}/requests/train_step_000_request.csv")
+        requested_ids = set(request_df["sample_id"].tolist())
+        assert len(requested_ids) == 5, f"Expected 5 request IDs, got {len(requested_ids)}"
+
+        # Verify pending was populated by export
+        state_after_export = RunState.load(run_dir)
+        assert all(rid in state_after_export.pending_sample_ids for rid in requested_ids), \
+            "Export should have added all 5 IDs to pending_sample_ids"
+
+        # First partial import: only 2 out of 5 (overwrite=True resets existing data)
+        partial_a = request_df.head(2).copy()
+        for out_name in test_config.model.output_names:
+            partial_a[out_name] = 1.0
+        partial_a_path = Path(run_dir) / "sim_partial_a.csv"
+        partial_a.to_csv(partial_a_path, index=False)
+
+        import_labels(run_dir, kind="train", step=0, input_path=str(partial_a_path),
+                      overwrite=True, allow_partial=True)
+
+        state_after_a = RunState.load(run_dir)
+        assert state_after_a.train_requests["0"]["status"] == "partial"
+        # Pending should still have all 5 IDs (nothing complete yet)
+        assert len(state_after_a.pending_sample_ids) >= 3, \
+            f"After first partial import, pending should retain IDs. Got: {state_after_a.pending_sample_ids}"
+
+        # Second partial import: remaining 3 out of 5 (no overwrite - cumulative)
+        partial_b = request_df.tail(3).copy()
+        for out_name in test_config.model.output_names:
+            partial_b[out_name] = 2.0
+        partial_b_path = Path(run_dir) / "sim_partial_b.csv"
+        partial_b.to_csv(partial_b_path, index=False)
+
+        import_labels(run_dir, kind="train", step=0, input_path=str(partial_b_path),
+                      overwrite=False, allow_partial=True)
+
+        state_final = RunState.load(run_dir)
+
+        # CRITICAL ASSERTIONS:
+        # 1. Status must be labeled (cumulative completeness satisfied)
+        assert state_final.train_requests["0"]["status"] == "labeled", \
+            f"Cumulative partial import should flip status to 'labeled', got '{state_final.train_requests['0']['status']}'"
+
+        # 2. ALL requested IDs must be removed from pending_sample_ids
+        remaining_requested = [sid for sid in state_final.pending_sample_ids if sid in requested_ids]
+        assert len(remaining_requested) == 0, \
+            f"PENDING BUG: {len(remaining_requested)} requested IDs still stuck in pending_sample_ids after cumulative completion: {remaining_requested}"
+
+        # 3. Dataset should have all 5 rows plus any validation data
+        labeled_df = read_csv(f"{run_dir}/datasets/train_labeled.csv")
+        assert len(labeled_df) >= 5, f"Expected at least 5 labeled rows, got {len(labeled_df)}"
+
+        # 4. All requested IDs must appear in the labeled dataset
+        labeled_ids = set(labeled_df["sample_id"].tolist())
+        assert requested_ids.issubset(labeled_ids), \
+            f"Some requested IDs missing from labeled data: {requested_ids - labeled_ids}"
 
 
 if __name__ == "__main__":

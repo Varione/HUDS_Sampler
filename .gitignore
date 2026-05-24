@@ -38,8 +38,9 @@ coverage.xml
 
 # Run directories (active learning execution artifacts)
 runs/
-tmp_smoke_run*/
-tmp_smoke_config*.json
+tmp_*_run*/
+tmp_*_config*.json
+tmp_review*
 
 # Model checkpoints and training artifacts
 checkpoints/

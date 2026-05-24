@@ -229,13 +229,16 @@ def _update_import_state(
     run_path: Path,
     kind: str,
     step_key: str | None,
-    imported_ids: list[int],
+    requested_ids: set[object],
     pending_missing: set[object] | None,
 ) -> None:
     """Update state after importing labels.
 
     Called AFTER _validate_import_completeness and AFTER files are written.
     pending_missing is the missing-IDs set returned by validation (empty = complete).
+
+    P2 FIX: When cumulative partial imports complete a step, remove ALL requested_ids
+    from pending_sample_ids (not just the last batch), so status counts stay accurate.
     """
     state = _load_state(run_path)
     if kind == "validation":
@@ -245,18 +248,19 @@ def _update_import_state(
 
         if is_complete:
             state.train_requests.setdefault(step_key, {})["status"] = "labeled"
+            # Remove ALL requested IDs from pending (cumulative partial may have been split across batches)
+            remove_set = requested_ids
         else:
             state.train_requests[step_key] = {
                 **state.train_requests.get(step_key, {}),
                 "status": "partial",
             }
+            # Keep only the still-missing IDs in pending, drop the newly imported ones
+            remove_set = requested_ids - (pending_missing or set())
 
-        # Clear pending IDs only for the portion that is now labeled.
-        if is_complete:
-            imported_set = set(imported_ids)
-            state.pending_sample_ids = [
-                sid for sid in state.pending_sample_ids if sid not in imported_set
-            ]
+        state.pending_sample_ids = [
+            sid for sid in state.pending_sample_ids if sid not in remove_set
+        ]
 
     state.save()
 
@@ -317,10 +321,9 @@ def import_labels(
     )
 
     # --- 4. Write files (only after all validation passed) ---
-    imported_ids_list = list(labeled_df[SAMPLE_ID_COLUMN].tolist())
     _write_labeled_data(output_path, labeled_df, overwrite)
 
     # --- 5. Update state ---
-    _update_import_state(run_path, kind, step_key, imported_ids_list, pending_missing)
+    _update_import_state(run_path, kind, step_key, requested_ids, pending_missing)
 
     return len(labeled_df)
