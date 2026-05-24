@@ -44,6 +44,7 @@ class TrainingConfig:
     patience: int = 30
     device: str = "cuda"
     retrain_from_scratch: bool = False  # FIX 2: Add option to control checkpoint loading
+    restore_optimizer_state: bool = True  # P2-Fix D: Restore optimizer state from checkpoint for continuous training
 
 
 @dataclass

@@ -58,7 +58,9 @@ def show_status(run_dir: str | Path) -> dict[str, Any]:
     validation_labeled_df = _read_optional_csv(run_path / "datasets" / "validation_labeled.csv")
 
     labeled_train_ids = _sample_id_set(train_labeled_df)
-    remaining_unlabeled = _remaining_unlabeled_count(train_pool_df, labeled_train_ids, state)
+    remaining_unlabeled_total = _remaining_unlabeled_count(train_pool_df, labeled_train_ids, state)
+    pending_train_count = len(state.pending_sample_ids)
+    available_for_sampling = max(0, remaining_unlabeled_total - pending_train_count)
     latest_checkpoint = state.latest_checkpoint or _existing_relative_path(run_path, run_path / "checkpoints" / "model_latest.pt")
 
     status = {
@@ -69,7 +71,9 @@ def show_status(run_dir: str | Path) -> dict[str, Any]:
         "labeled_val_count": _row_count(validation_labeled_df),
         "current_step": int(state.current_step),
         "latest_checkpoint": latest_checkpoint,
-        "remaining_unlabeled": remaining_unlabeled,
+        "remaining_unlabeled_total": remaining_unlabeled_total,
+        "pending_train_count": pending_train_count,
+        "available_for_sampling_count": available_for_sampling,
         "next_command": _next_command(state, train_labeled_df, validation_labeled_df, latest_checkpoint),
     }
 

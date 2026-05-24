@@ -1,0 +1,56 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+eggs/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Pytest cache
+.pytest_cache/
+
+# Coverage reports
+htmlcov/
+.coverage
+coverage.xml
+
+# Run directories (active learning execution artifacts)
+runs/
+tmp_smoke_run*/
+tmp_smoke_config*.json
+
+# Model checkpoints and training artifacts
+checkpoints/
+**/model_*.pt
+**/*.pth
+
+# Generated datasets during active learning workflow
+datasets/
+
+# Metrics output
+metrics/
+
+# Diagnostics from HUDS sampling
+diagnostics/

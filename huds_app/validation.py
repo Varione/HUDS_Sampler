@@ -187,6 +187,34 @@ def _reject_duplicate_labels(existing: pd.DataFrame, incoming: pd.DataFrame) -> 
         raise ValueError(f"Duplicate sample_id(s) already exist in labeled dataset: {duplicate_ids}")
 
 
+def _validate_import_completeness(
+    requested_ids: set[object],
+    existing_labeled_ids: set[object],
+    incoming_ids: set[object],
+    allow_partial: bool,
+    step_key: str | None,
+) -> set[object]:
+    """Validate that all requested IDs are covered (existing + incoming).
+
+    Returns the set of still-missing IDs (empty if fully complete).
+    Raises ValueError if incomplete and allow_partial is False.
+
+    Cumulative partial logic: existing labeled data counts toward completeness
+    so multiple --allow-partial imports can collectively satisfy a step request.
+    """
+    combined_ids = existing_labeled_ids | incoming_ids
+    missing_ids = requested_ids - combined_ids
+
+    if missing_ids and not allow_partial:
+        label = f" (step {step_key})" if step_key else ""
+        raise ValueError(
+            f"Import incomplete{label}: {len(missing_ids)} sample ID(s) from request "
+            f"are missing in simulator output. Use --allow-partial to permit partial "
+            f"imports, or ensure all requests were simulated."
+        )
+    return missing_ids
+
+
 def _write_labeled_data(output_path: Path, labeled_df: pd.DataFrame, overwrite: bool) -> None:
     if overwrite or not output_path.exists():
         write_csv(labeled_df, output_path)
@@ -198,46 +226,38 @@ def _write_labeled_data(output_path: Path, labeled_df: pd.DataFrame, overwrite: 
 
 
 def _update_import_state(
-    run_path: Path, 
-    kind: str, 
-    step: int | str | None, 
+    run_path: Path,
+    kind: str,
+    step_key: str | None,
     imported_ids: list[int],
-    request_df: pd.DataFrame,
-    allow_partial: bool = False
+    pending_missing: set[object] | None,
 ) -> None:
     """Update state after importing labels.
-    
-    FIX 1: Properly manage pending_sample_ids when imports complete.
-    FIX 3: Validate completeness of label import against request file.
+
+    Called AFTER _validate_import_completeness and AFTER files are written.
+    pending_missing is the missing-IDs set returned by validation (empty = complete).
     """
-    # FIX 3: Check if all requested IDs were imported
-    requested_ids = set(request_df[SAMPLE_ID_COLUMN].tolist())
-    imported_id_set = set(imported_ids)
-    
-    missing_ids = requested_ids - imported_id_set
-    if missing_ids and not allow_partial:
-        raise ValueError(
-            f"Import incomplete: {len(missing_ids)} sample IDs from request are missing in simulator output. "
-            f"Use --allow-partial to permit partial imports, or ensure all requests were simulated."
-        )
-    
     state = _load_state(run_path)
     if kind == "validation":
         state.validation_labeled = True
-    elif kind == "train":
-        step_key = str(int(step)) if step is not None else "0"
-        
-        # FIX 3: Set status based on completeness
-        if allow_partial and missing_ids:
-            state.train_requests.setdefault(step_key, {})["status"] = "partial"
-        else:
+    elif kind == "train" and step_key is not None:
+        is_complete = pending_missing is None or len(pending_missing) == 0
+
+        if is_complete:
             state.train_requests.setdefault(step_key, {})["status"] = "labeled"
-            
-        # FIX 1: Clear pending IDs for this step after successful import
-        if not allow_partial or len(missing_ids) == 0:
-            ids_to_remove = set(requested_ids) & set(state.pending_sample_ids)
-            state.pending_sample_ids = [id for id in state.pending_sample_ids if id not in ids_to_remove]
-    
+        else:
+            state.train_requests[step_key] = {
+                **state.train_requests.get(step_key, {}),
+                "status": "partial",
+            }
+
+        # Clear pending IDs only for the portion that is now labeled.
+        if is_complete:
+            imported_set = set(imported_ids)
+            state.pending_sample_ids = [
+                sid for sid in state.pending_sample_ids if sid not in imported_set
+            ]
+
     state.save()
 
 
@@ -247,23 +267,29 @@ def import_labels(
     step: int | str | None,
     input_path: str | Path,
     overwrite: bool = False,
-    allow_partial: bool = False,  # FIX 3: New parameter for partial imports
+    allow_partial: bool = False,
 ) -> int:
     """Import simulator output labels.
-    
+
+    P1 FIX A  – All validation runs BEFORE any file writes so a failed import
+                never corrupts existing labeled data on disk.
+    P1 FIX B  – Completeness check uses cumulative IDs (existing labeled CSV +
+                incoming), so multiple --allow-partial imports can collectively
+                satisfy a step request and flip status to "labeled".
+
     Args:
         run_dir: Run directory path
         kind: 'validation' or 'train'
         step: Training step number (required for train kind)
         input_path: Path to simulator output CSV
         overwrite: Whether to overwrite existing labeled data
-        allow_partial: Whether to permit partial label imports (FIX 3)
+        allow_partial: Whether to permit partial label imports
     """
     run_path = ensure_run_dir(str(run_dir))
     config = _load_config(run_path)
     request_path = _request_path_for_import(run_path, kind, step)
-    
-    # Read the request file for completeness checking (FIX 3)
+
+    # --- 1. Read inputs (read-only phase) ---
     request_df = read_csv(request_path)
     _register_request_ids(config, request_df, replace=True)
 
@@ -273,12 +299,28 @@ def import_labels(
         raise ValueError("Invalid simulator output: " + "; ".join(errors))
 
     labeled_df = simulator_df[_labeled_columns(config)].copy()
-    imported_ids = list(labeled_df[SAMPLE_ID_COLUMN].tolist())
-    
+    incoming_ids = set(_column(labeled_df, SAMPLE_ID_COLUMN).tolist())
+
+    # --- 2. Read existing labeled data for cumulative check (P1 FIX B) ---
+    #     If overwrite=True, the file will be replaced so only incoming counts.
     output_path = run_path / "datasets" / f"{kind}_labeled.csv"
+    if overwrite or not output_path.exists():
+        existing_labeled_ids: set[object] = set()
+    else:
+        existing_labeled_ids = set(read_csv(output_path)[SAMPLE_ID_COLUMN].tolist())
+
+    # --- 3. Validate completeness BEFORE any file writes (P1 FIX A) ---
+    step_key = str(int(step)) if kind == "train" and step is not None else None
+    requested_ids = set(_column(request_df, SAMPLE_ID_COLUMN).tolist())
+    pending_missing = _validate_import_completeness(
+        requested_ids, existing_labeled_ids, incoming_ids, allow_partial, step_key
+    )
+
+    # --- 4. Write files (only after all validation passed) ---
+    imported_ids_list = list(labeled_df[SAMPLE_ID_COLUMN].tolist())
     _write_labeled_data(output_path, labeled_df, overwrite)
-    
-    # FIX 1 & 3: Update state with completeness checking and pending ID management
-    _update_import_state(run_path, kind, step, imported_ids, request_df, allow_partial)
-    
+
+    # --- 5. Update state ---
+    _update_import_state(run_path, kind, step_key, imported_ids_list, pending_missing)
+
     return len(labeled_df)

@@ -73,18 +73,25 @@ def apply_target_normalization(y: Any, out_stats: dict[str, float]) -> Any:
 
 
 def train_step(
-    model: ResidualMLP, 
-    train_loader: DataLoader, 
-    val_loader: DataLoader, 
-    config: Any, 
-    device: torch.device | str, 
-    normalization_stats: dict[str, Any] | None = None  # FIX 5: Pass normalization for physical unit metrics
+    model: ResidualMLP,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    config: Any,
+    device: torch.device | str,
+    normalization_stats: dict[str, Any] | None = None,  # FIX 5: Pass normalization for physical unit metrics
+    optimizer: torch.optim.Optimizer | None = None,       # P2-Fix D: Optional pre-built optimizer (checkpoint restore)
 ) -> dict[str, float]:
+    """Execute one or more training steps.
+
+    P2-Fix D: If an optimizer instance is passed (from checkpoint restore), reuse it
+              for continuous training momentum. Otherwise create a fresh Adam optimizer.
+    """
     start_time = time.perf_counter()
     device = torch.device(device)
     model.to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
+    if optimizer is None:
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
     loss_fn = torch.nn.MSELoss()
     best_val_loss = float("inf")
     epochs_without_improvement = 0
@@ -211,20 +218,31 @@ def train_model(run_dir: str | Path, config: Any) -> dict[str, float]:
     config.best_checkpoint_path = str(checkpoint_best)
 
     device = torch.device(config.training.device if torch.cuda.is_available() or config.training.device != "cuda" else "cpu")
-    
+
     # FIX 2: Load existing checkpoint before training (unless retrain_from_scratch is True)
     model = build_model(config)
+    restored_optimizer: torch.optim.Optimizer | None = None
+
     if not getattr(config.training, 'retrain_from_scratch', False) and checkpoint_latest.exists():
         print(f"Loading existing checkpoint from {checkpoint_latest}")
         try:
             checkpoint_data = torch.load(checkpoint_latest, map_location=device)
             model.load_state_dict(checkpoint_data["model_state_dict"])
-            print("Checkpoint loaded successfully")
+
+            # P2-Fix D: Optionally restore optimizer state for continuous training momentum
+            if getattr(config.training, 'restore_optimizer_state', True):
+                optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
+                optimizer.load_state_dict(checkpoint_data["optimizer_state_dict"])
+                restored_optimizer = optimizer
+                print("Checkpoint and optimizer state loaded successfully")
+            else:
+                print("Checkpoint loaded (optimizer reset per config)")
         except Exception as e:
             print(f"Warning: Failed to load checkpoint ({e}), training from scratch")
-    
+
     # FIX 5: Pass normalization stats so evaluation can compute physical unit metrics
-    metrics = train_step(model, train_loader, val_loader, config, device, normalization_stats=normalization)
+    metrics = train_step(model, train_loader, val_loader, config, device,
+                         normalization_stats=normalization, optimizer=restored_optimizer)
 
     metrics_path = metrics_dir / "training_metrics.csv"
     append_csv(pd.DataFrame([metrics]), metrics_path)
