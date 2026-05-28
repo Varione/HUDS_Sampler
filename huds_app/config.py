@@ -11,6 +11,7 @@ class VariableConfig:
     min: float
     max: float
     sample_points: int
+    unit: str = ""
 
 
 @dataclass
@@ -141,7 +142,8 @@ def inspect_config(config: AppConfig) -> None:
     print()
     print("Variables:")
     for v in config.variables:
-        print(f"  {v.name}: [{v.min}, {v.max}], {v.sample_points} levels")
+        unit = f" {v.unit}" if v.unit else ""
+        print(f"  {v.name}: [{v.min}, {v.max}]{unit}, {v.sample_points} levels")
     print()
     print("Candidate pool:")
     print(f"  total_samples={config.candidate_pool.total_samples}")

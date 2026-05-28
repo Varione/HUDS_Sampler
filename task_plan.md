@@ -1,15 +1,31 @@
-## Task Plan
+# Task Plan
 
-Task: create `huds_app/workflow.py` orchestration and status reporting module.
+Task: simplify the repository to the core HUDS active-learning engine.
 
-Phases:
+## Scope Kept
 
-1. Inspect existing module contracts for config, storage, sampling, schema, model, train, validation, and HUDS.
-2. Implement the requested workflow API without training, HUDS sampling, or CLI parsing logic.
-3. Validate changed file with diagnostics, imports, initialization, file validation, and status surface calls.
+- Candidate pool generation and train/validation split
+- File-based request export and label import
+- Residual MLP surrogate model training
+- MC-dropout uncertainty estimation
+- HUDS sample selection with uncertainty and diversity
+- CLI workflow orchestration and tests
 
-Key decisions:
+## Scope Removed
 
-- Use `RunState` as the single persisted workflow state source.
-- Use root pool files because `sampling.save_pool_files` and `validation.py` read them from `run_dir`.
-- Reuse `train.load_normalization` and `train.apply_normalization` to keep prediction and evaluation consistent with training.
+- Desktop GUI package and widgets
+- Desktop packaging files
+- GUI-specific service tests
+- Maxwell/AEDT conversion helper
+- Temporary smoke/review runs
+- Build and distribution artifacts
+
+## Current Verification Target
+
+Run:
+
+```powershell
+python -m pytest -q
+```
+
+Expected: core tests pass without desktop or GUI dependencies.

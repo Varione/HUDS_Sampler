@@ -189,6 +189,48 @@ class TestEndToEndWorkflow:
         state = RunState.load(run_dir)
         assert state.validation_labeled is True
 
+    def test_incremental_validation_request_excludes_existing_ids(self, run_dir, test_config):
+        """Exporting an incremental validation request should append new validation samples."""
+        incremental_path = export_validation_request(
+            run_dir,
+            test_config,
+            size=10,
+            incremental=True,
+        )
+
+        assert incremental_path.name == "validation_request_001.csv"
+
+        original_request = read_csv(f"{run_dir}/requests/validation_request.csv")
+        incremental_request = read_csv(incremental_path)
+        assert len(incremental_request) == 10
+        assert set(original_request["sample_id"]).isdisjoint(set(incremental_request["sample_id"]))
+
+        state_after_export = RunState.load(run_dir)
+        assert state_after_export.validation_labeled is False
+        assert state_after_export.validation_requests["1"]["status"] == "exported"
+
+        sim_output_path = Path(run_dir) / "temp_val_incremental_sim.csv"
+        np.random.seed(1001)
+        for out_name in test_config.model.output_names:
+            incremental_request[out_name] = (
+                np.sin(incremental_request["x1"].values * 6 + incremental_request["x2"].values * 4)
+                + np.random.randn(len(incremental_request)) * 0.05
+            )
+        incremental_request.to_csv(sim_output_path, index=False)
+
+        imported_count = import_labels(
+            run_dir=run_dir,
+            kind="validation",
+            step=None,
+            input_path=str(sim_output_path),
+        )
+
+        assert imported_count == 10
+        state_after_import = RunState.load(run_dir)
+        assert state_after_import.validation_labeled is True
+        labeled = read_csv(f"{run_dir}/datasets/validation_labeled.csv")
+        assert len(labeled) == 60
+
     def test_export_initial_train_adds_to_pending(self, run_dir, test_config):
         """Step 3: Export initial train request SHOULD add to pending_sample_ids.
         

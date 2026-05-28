@@ -80,6 +80,7 @@ def train_step(
     device: torch.device | str,
     normalization_stats: dict[str, Any] | None = None,  # FIX 5: Pass normalization for physical unit metrics
     optimizer: torch.optim.Optimizer | None = None,       # P2-Fix D: Optional pre-built optimizer (checkpoint restore)
+    progress_cb: Any | None = None,
 ) -> dict[str, float]:
     """Execute one or more training steps.
 
@@ -167,12 +168,28 @@ def train_step(
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement >= config.training.patience:
+                if progress_cb is not None:
+                    progress_cb(
+                        f"早停：第 {epoch}/{config.training.epochs_per_step} 轮",
+                        100,
+                    )
                 break
+
+        if progress_cb is not None:
+            percent = int(epoch / max(1, config.training.epochs_per_step) * 100)
+            progress_cb(
+                (
+                    f"第 {epoch}/{config.training.epochs_per_step} 轮 | "
+                    f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}, "
+                    f"R2={float(val_metrics.get('r2_avg', 0.0)):.4f}"
+                ),
+                min(100, max(0, percent)),
+            )
 
     return best_metrics or epoch_metrics
 
 
-def train_model(run_dir: str | Path, config: Any) -> dict[str, float]:
+def train_model(run_dir: str | Path, config: Any, progress_cb: Any | None = None) -> dict[str, float]:
     """Train the surrogate model.
     
     FIX 2: Load existing checkpoint before training (unless retrain_from_scratch is True).
@@ -220,7 +237,7 @@ def train_model(run_dir: str | Path, config: Any) -> dict[str, float]:
     device = torch.device(config.training.device if torch.cuda.is_available() or config.training.device != "cuda" else "cpu")
 
     # FIX 2: Load existing checkpoint before training (unless retrain_from_scratch is True)
-    model = build_model(config)
+    model = build_model(config).to(device)
     restored_optimizer: torch.optim.Optimizer | None = None
 
     if not getattr(config.training, 'retrain_from_scratch', False) and checkpoint_latest.exists():
@@ -233,6 +250,7 @@ def train_model(run_dir: str | Path, config: Any) -> dict[str, float]:
             if getattr(config.training, 'restore_optimizer_state', True):
                 optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
                 optimizer.load_state_dict(checkpoint_data["optimizer_state_dict"])
+                _move_optimizer_to_device(optimizer, device)
                 restored_optimizer = optimizer
                 print("Checkpoint and optimizer state loaded successfully")
             else:
@@ -242,11 +260,12 @@ def train_model(run_dir: str | Path, config: Any) -> dict[str, float]:
 
     # FIX 5: Pass normalization stats so evaluation can compute physical unit metrics
     metrics = train_step(model, train_loader, val_loader, config, device,
-                         normalization_stats=normalization, optimizer=restored_optimizer)
+                         normalization_stats=normalization, optimizer=restored_optimizer,
+                         progress_cb=progress_cb)
 
     metrics_path = metrics_dir / "training_metrics.csv"
     append_csv(pd.DataFrame([metrics]), metrics_path)
-    _update_state(run_path, checkpoint_latest, checkpoint_best)
+    _update_state(run_path, checkpoint_latest, checkpoint_best, config)
     return metrics
 
 
@@ -353,6 +372,13 @@ def _save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer, m
     )
 
 
+def _move_optimizer_to_device(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
+    for state in optimizer.state.values():
+        for key, value in list(state.items()):
+            if torch.is_tensor(value):
+                state[key] = value.to(device)
+
+
 def _validate_columns(df: pd.DataFrame, columns: list[str], path: Path) -> None:
     missing = [column for column in columns if column not in df.columns]
     if missing:
@@ -366,11 +392,12 @@ def _load_current_step(run_path: Path) -> int:
         return 0
 
 
-def _update_state(run_path: Path, latest_checkpoint: Path, best_checkpoint: Path) -> None:
+def _update_state(run_path: Path, latest_checkpoint: Path, best_checkpoint: Path, config: Any) -> None:
     try:
         state = RunState.load(str(run_path))
     except FileNotFoundError:
         state = RunState(run_dir=str(run_path))
     state.latest_checkpoint = str(latest_checkpoint)
     state.best_checkpoint = str(best_checkpoint)
+    state.trained_step = int(getattr(config, "current_step", state.current_step))
     state.save()

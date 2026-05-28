@@ -48,6 +48,17 @@ class TestLoadConfig:
         assert len(result.variables) == 1
         assert result.variables[0].name == "x1"
 
+    def test_load_variable_unit(self):
+        cfg = _valid_config_dict()
+        cfg["variables"][0]["unit"] = "mm"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            path = f.name
+
+        result = load_config(path)
+
+        assert result.variables[0].unit == "mm"
+
 
 class TestValidateConfigDuplicateNames:
     def test_duplicate_variable_names_raises(self):

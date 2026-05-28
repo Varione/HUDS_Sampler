@@ -70,11 +70,20 @@ def show_status(run_dir: str | Path) -> dict[str, Any]:
         "labeled_train_count": _row_count(train_labeled_df),
         "labeled_val_count": _row_count(validation_labeled_df),
         "current_step": int(state.current_step),
+        "trained_step": int(state.trained_step),
+        "max_steps": int(config.training.max_steps),
         "latest_checkpoint": latest_checkpoint,
         "remaining_unlabeled_total": remaining_unlabeled_total,
         "pending_train_count": pending_train_count,
         "available_for_sampling_count": available_for_sampling,
-        "next_command": _next_command(state, train_labeled_df, validation_labeled_df, latest_checkpoint),
+        "next_command": _next_command(
+            state,
+            train_labeled_df,
+            validation_labeled_df,
+            latest_checkpoint,
+            config,
+            available_for_sampling,
+        ),
     }
 
     _print_status(status, config.project_name)
@@ -216,6 +225,8 @@ def _next_command(
     train_labeled_df: pd.DataFrame | None,
     validation_labeled_df: pd.DataFrame | None,
     latest_checkpoint: str | None,
+    config: Any,
+    available_for_sampling: int,
 ) -> str:
     """Determine the next recommended command based on workflow state.
     
@@ -235,8 +246,8 @@ def _next_command(
     if train_status != "labeled" or _row_count(train_labeled_df) == 0:
         return f"import-labels --kind train --step {state.current_step}"
     
-    # Training data is labeled, check if we have a checkpoint to continue training
-    if not latest_checkpoint:
+    # Current step has labels but has not been trained into a checkpoint yet.
+    if not latest_checkpoint or int(state.trained_step) < int(state.current_step):
         return "train"
         
     # Check if there are pending samples that need training first
@@ -247,7 +258,12 @@ def _next_command(
     
     if has_pending_train:
         return "train"
-        
+
+    if int(state.current_step) >= int(config.training.max_steps):
+        return ""
+    if int(available_for_sampling) <= 0:
+        return ""
+
     # No pending training data, ready to sample next batch
     next_step = int(state.current_step) + 1
     return f"sample --step {next_step}"

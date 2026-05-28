@@ -62,7 +62,12 @@ def _handle_init(args: argparse.Namespace) -> None:
 def _handle_export_validation(args: argparse.Namespace) -> None:
     validation = _load_module("validation")
     config = _load_run_config(args.run)
-    output_path = validation.export_validation_request(args.run, config, size=args.size)
+    output_path = validation.export_validation_request(
+        args.run,
+        config,
+        size=args.size,
+        incremental=args.incremental,
+    )
     _print_result(output_path, "Exported validation request.")
 
 
@@ -163,6 +168,11 @@ def build_parser() -> argparse.ArgumentParser:
     export_validation_parser = subparsers.add_parser("export-validation", help="Export validation samples for simulation.")
     _add_run_argument(export_validation_parser)
     export_validation_parser.add_argument("--size", type=int, help="Number of validation samples to export.")
+    export_validation_parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Append a new validation request excluding previously requested/labeled validation samples.",
+    )
     export_validation_parser.set_defaults(handler=_handle_export_validation)
 
     export_initial_train_parser = subparsers.add_parser("export-initial-train", help="Export initial training samples.")
