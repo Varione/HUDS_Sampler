@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 fast = ["faiss-cpu"]
+test = ["pytest"]
 
 [project.scripts]
 huds-app = "huds_app.cli:main"

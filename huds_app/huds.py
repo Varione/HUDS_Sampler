@@ -67,7 +67,7 @@ def select_huds(model, train_pool_df, unlabeled_mask, train_labeled_df, config, 
         return _empty_selection_result()
 
     feature_values = candidate_pool[var_cols].to_numpy(dtype=np.float32)
-    x_tensor = torch.as_tensor(feature_values, dtype=torch.float32, device=device)
+    x_tensor = torch.tensor(feature_values, dtype=torch.float32, device=device)
     _, uncertainties = mc_dropout_predict(
         model,
         x_tensor,
@@ -123,6 +123,7 @@ def run_huds_sampling(run_dir, config, step):
     run_path = ensure_run_dir(str(run_dir))
     state = RunState.load(str(run_path))
     app_config = _resolve_config(run_path, config)
+    _validate_sampling_step(state, app_config, step)
     variable_columns = [variable.name for variable in app_config.variables]
 
     train_pool_df = read_csv(run_path / "train_pool.csv")
@@ -172,6 +173,35 @@ def run_huds_sampling(run_dir, config, step):
     state.save()
 
     return result
+
+
+def _validate_sampling_step(state, config, step):
+    requested_step = int(step)
+
+    if requested_step <= 0:
+        raise ValueError("sampling step must be >= 1")
+    if requested_step > int(config.training.max_steps):
+        raise ValueError(
+            f"sampling step {requested_step} exceeds configured max_steps={int(config.training.max_steps)}"
+        )
+    if str(requested_step) in state.train_requests:
+        raise ValueError(f"training request for step {requested_step} already exists")
+
+    expected_step = int(state.current_step) + 1
+    if requested_step != expected_step:
+        raise ValueError(
+            f"sampling step must be the next step in sequence: expected {expected_step}, got {requested_step}"
+        )
+
+    has_pending_train = any(
+        request.get("status") in {"exported", "partial"}
+        for request in state.train_requests.values()
+    )
+    if has_pending_train:
+        raise ValueError("cannot sample a new step while previous training requests are still pending labels")
+
+    if int(state.trained_step) < int(state.current_step):
+        raise ValueError("cannot sample a new step before the current step has been trained")
 
 
 def _validate_selection_inputs(train_pool_df, var_cols):

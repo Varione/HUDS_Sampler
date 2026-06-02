@@ -148,6 +148,20 @@ def _handle_evaluate(args: argparse.Namespace) -> None:
     _print_result(result, "Evaluation completed.")
 
 
+def _handle_export_maxwell(args: argparse.Namespace) -> None:
+    maxwell = _load_module("maxwell")
+    config = _load_run_config(args.run) if args.run else (load_config(args.config) if args.config else None)
+    unit_overrides = maxwell.parse_unit_overrides(args.unit)
+    output_path = maxwell.export_maxwell_table(
+        input_path=args.input,
+        output_path=args.output,
+        config=config,
+        units=unit_overrides,
+        index_column_name=args.index_column,
+    )
+    _print_result(output_path, "Exported Maxwell parameter table.")
+
+
 def _add_run_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run", required=True, help="Run directory, for example runs/demo.")
 
@@ -219,6 +233,24 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser = subparsers.add_parser("evaluate", help="Evaluate the current model on validation data.")
     _add_run_argument(evaluate_parser)
     evaluate_parser.set_defaults(handler=_handle_evaluate)
+
+    export_maxwell_parser = subparsers.add_parser("export-maxwell", help="Convert a request CSV into a Maxwell parametric table CSV.")
+    export_maxwell_parser.add_argument("--input", required=True, help="Input HUDS request CSV path.")
+    export_maxwell_parser.add_argument("--output", required=True, help="Output Maxwell CSV path.")
+    export_maxwell_parser.add_argument("--run", help="Run directory containing config.json for variable ordering and units.")
+    export_maxwell_parser.add_argument("--config", help="Config JSON path used when --run is not provided.")
+    export_maxwell_parser.add_argument(
+        "--unit",
+        action="append",
+        default=[],
+        help="Override variable unit as NAME=UNIT. Can be passed multiple times.",
+    )
+    export_maxwell_parser.add_argument(
+        "--index-column",
+        default="*",
+        help="Index column name used by the Maxwell table. Defaults to '*'.",
+    )
+    export_maxwell_parser.set_defaults(handler=_handle_export_maxwell)
 
     return parser
 

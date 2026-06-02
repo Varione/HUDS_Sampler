@@ -2,13 +2,13 @@
   "project_name": "demo_huds_project",
   "random_seed": 42,
   "variables": [
-    {"name": "lx", "min": 0.01, "max": 0.08, "sample_points": 12},
-    {"name": "ly", "min": 0.01, "max": 0.10, "sample_points": 12},
-    {"name": "lz", "min": 0.01, "max": 0.30, "sample_points": 12},
-    {"name": "gap", "min": 0.005, "max": 0.06, "sample_points": 12},
-    {"name": "py_val", "min": 0.005, "max": 0.05, "sample_points": 12},
-    {"name": "sigma", "min": 20000000, "max": 60000000, "sample_points": 12},
-    {"name": "vx", "min": 10, "max": 1500, "sample_points": 12}
+    {"name": "lx", "min": 0.01, "max": 0.08, "sample_points": 12, "unit": "mm"},
+    {"name": "ly", "min": 0.01, "max": 0.10, "sample_points": 12, "unit": "mm"},
+    {"name": "lz", "min": 0.01, "max": 0.30, "sample_points": 12, "unit": "mm"},
+    {"name": "gap", "min": 0.005, "max": 0.06, "sample_points": 12, "unit": "mm"},
+    {"name": "py_val", "min": 0.005, "max": 0.05, "sample_points": 12, "unit": "mm"},
+    {"name": "sigma", "min": 20000000, "max": 60000000, "sample_points": 12, "unit": "Pa"},
+    {"name": "vx", "min": 10, "max": 1500, "sample_points": 12, "unit": "m_per_sec"}
   ],
   "candidate_pool": {
     "total_samples": 12000,

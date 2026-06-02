@@ -19,7 +19,7 @@ conversion helpers have been removed.
 ## Install
 
 ```powershell
-cd E:\tt\huds-active-learning-app
+cd D:\TempData\huds
 pip install -e .
 ```
 
@@ -29,11 +29,17 @@ Optional FAISS acceleration for clustering:
 pip install -e ".[fast]"
 ```
 
+If you prefer `requirements.txt`, it contains only the core runtime
+dependencies. `faiss-cpu` remains optional because the code automatically
+falls back to scikit-learn KMeans when FAISS is unavailable.
+
 ## Test
 
 ```powershell
 python -m pytest -q
 ```
+
+The current repository test suite passes with `73 passed`.
 
 ## Basic Workflow
 
@@ -79,10 +85,59 @@ Select the next active-learning batch:
 huds-app sample --run runs\demo --step 1
 ```
 
+Sampling is stateful. The CLI rejects:
+
+- non-positive step numbers
+- sampling the same step twice
+- skipping ahead to a later step
+- sampling beyond `training.max_steps`
+- sampling while a prior training request is still unlabeled or partially labeled
+
 Check status:
 
 ```powershell
 huds-app status --run runs\demo
+```
+
+Run predictions on arbitrary candidate rows after training:
+
+```powershell
+huds-app predict --run runs\demo --input candidates.csv --output predictions.csv
+```
+
+Evaluate the current checkpoint on validation data:
+
+```powershell
+huds-app evaluate --run runs\demo
+```
+
+Convert a HUDS request CSV into a Maxwell parametric table:
+
+```powershell
+huds-app export-maxwell --run runs\demo --input runs\demo\requests\train_step_000_request.csv --output ParametricSetup1_Table.csv
+```
+
+The Maxwell export writes a CSV shaped like:
+
+```text
+*,gap,v
+1,5mm,0m_per_sec
+2,8mm,1m_per_sec
+```
+
+Variable units come from `variables[].unit` in the JSON config. You can also
+override them from the CLI:
+
+```powershell
+huds-app export-maxwell --input request.csv --output ParametricSetup1_Table.csv --unit gap=mm --unit v=m_per_sec
+```
+
+Imports are strict by default. If a simulator run only returns part of a
+requested batch, the import fails unless you explicitly allow cumulative
+partial imports:
+
+```powershell
+huds-app import-labels --run runs\demo --kind train --step 1 --input sim_out.csv --allow-partial
 ```
 
 ## Key Modules
@@ -104,11 +159,23 @@ Request files contain:
 sample_id,<variable_1>,<variable_2>,...
 ```
 
+Maxwell parametric export files contain:
+
+```text
+*,<variable_1>,<variable_2>,...
+```
+
+with each variable value serialized as `number + unit`, for example `5mm` or
+`0m_per_sec`.
+
 Simulator output files must contain:
 
 ```text
-sample_id,<output_1>,<output_2>,...
+sample_id,<variable_1>,<variable_2>,...,<output_1>,<output_2>,...
 ```
 
 Output names are defined by `model.output_names` in the JSON config.
+
+The import path validates `sample_id` coverage, duplicate IDs, missing numeric
+values, and missing output columns before it writes anything to disk.
 
