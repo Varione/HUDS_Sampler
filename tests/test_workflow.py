@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from huds_app.config import (
+from huds_app.core.config import (
     AppConfig,
     CandidatePoolConfig,
     HUDSConfig,
@@ -16,12 +16,12 @@ from huds_app.config import (
     ValidationConfig,
     VariableConfig,
 )
-from huds_app.huds import run_huds_sampling
-from huds_app.sampling import create_candidate_pool, save_pool_files, split_pool
-from huds_app.storage import RunState, read_csv, write_csv
-from huds_app.train import train_model
-from huds_app.validation import export_initial_train_request, export_validation_request, import_labels
-from huds_app.workflow import evaluate, predict
+from huds_app.sampling.huds import run_huds_sampling
+from huds_app.data.pool import create_candidate_pool, save_pool_files, split_pool
+from huds_app.core.storage import RunState, read_csv, write_csv
+from huds_app.model.train import train_model
+from huds_app.data.validation import export_initial_train_request, export_validation_request, import_labels
+from huds_app.interface.workflow import evaluate, predict
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def workflow_config():
             VariableConfig(name="x2", min=0.0, max=1.0, sample_points=5),
         ],
         candidate_pool=CandidatePoolConfig(total_samples=120, train_ratio=0.8, validation_ratio=0.2),
-        model=ModelConfig(output_names=["y1", "y2"], hidden_dim=16, residual_blocks=1, dropout=0.2),
+        model=ModelConfig(output_names=["y1", "y2"], hidden_dim=16, encoder_blocks=1, dropout=0.2),
         validation=ValidationConfig(default_size=20),
         training=TrainingConfig(
             initial_train_size=24,
@@ -46,7 +46,7 @@ def workflow_config():
             patience=3,
             device="cpu",
         ),
-        huds=HUDSConfig(pre_n=0, repeat_times=3, topk_ratio=0.6, batch_size=32, use_faiss=False),
+        huds=HUDSConfig(repeat_times=3, topk_ratio=0.6, batch_size=32, use_faiss=False),
     )
 
 

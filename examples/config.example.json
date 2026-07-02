@@ -18,7 +18,7 @@
   "model": {
     "output_names": ["fx", "fy"],
     "hidden_dim": 128,
-    "residual_blocks": 4,
+    "encoder_blocks": 4,
     "dropout": 0.1
   },
   "validation": {
@@ -39,6 +39,8 @@
     "repeat_times": 30,
     "topk_ratio": 0.6,
     "batch_size": 256,
-    "use_faiss": true
+    "use_faiss": true,
+    "use_top_p": false,
+    "top_p_threshold": 0.9
   }
 }

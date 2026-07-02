@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from huds_app.data_schema import (
+from huds_app.data.schema import (
     ColumnSpec,
     SAMPLE_ID_COLUMN,
     SchemaDefinition,

@@ -6,7 +6,7 @@ from dataclasses import asdict
 import pandas as pd
 import pytest
 
-from huds_app.config import (
+from huds_app.core.config import (
     AppConfig,
     CandidatePoolConfig,
     HUDSConfig,
@@ -15,8 +15,8 @@ from huds_app.config import (
     ValidationConfig,
     VariableConfig,
 )
-from huds_app.maxwell import export_maxwell_table, parse_unit_overrides
-from huds_app.storage import read_csv, write_csv
+from huds_app.interface.maxwell import export_maxwell_table, parse_unit_overrides
+from huds_app.core.storage import read_csv, write_csv
 
 
 @pytest.fixture

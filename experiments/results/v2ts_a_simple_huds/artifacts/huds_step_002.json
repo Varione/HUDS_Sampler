@@ -1,0 +1,523 @@
+{
+  "selected_ids": [
+    339,
+    344,
+    431,
+    285,
+    106,
+    253,
+    455,
+    453,
+    356,
+    131,
+    311,
+    145,
+    211,
+    426,
+    127,
+    303,
+    347,
+    324,
+    389,
+    428,
+    75,
+    374,
+    270,
+    375,
+    99,
+    457,
+    298,
+    409,
+    319,
+    264,
+    289,
+    74,
+    393,
+    266,
+    465,
+    429,
+    396,
+    92,
+    225,
+    187,
+    362,
+    118,
+    335,
+    85,
+    283,
+    404,
+    201,
+    473,
+    219,
+    441,
+    206,
+    129,
+    196,
+    439,
+    166,
+    231,
+    458,
+    353,
+    421,
+    269,
+    209,
+    402,
+    399,
+    408
+  ],
+  "uncertainties": [
+    0.0201263427734375,
+    0.0113372802734375,
+    0.014129638671875,
+    0.0180206298828125,
+    0.016265869140625,
+    0.0251007080078125,
+    0.0119781494140625,
+    0.0165252685546875,
+    0.01303863525390625,
+    0.01207733154296875,
+    0.0177459716796875,
+    0.018524169921875,
+    0.03729248046875,
+    0.0190277099609375,
+    0.017791748046875,
+    0.0163421630859375,
+    0.0179901123046875,
+    0.0211944580078125,
+    0.019927978515625,
+    0.016143798828125,
+    0.009552001953125,
+    0.0194854736328125,
+    0.0126800537109375,
+    0.01534271240234375,
+    0.01172637939453125,
+    0.0260009765625,
+    0.011688232421875,
+    0.024993896484375,
+    0.01277923583984375,
+    0.01258087158203125,
+    0.009521484375,
+    0.01386260986328125,
+    0.023590087890625,
+    0.016021728515625,
+    0.01194000244140625,
+    0.01132965087890625,
+    0.0117645263671875,
+    0.0175628662109375,
+    0.0307769775390625,
+    0.019775390625,
+    0.023040771484375,
+    0.018524169921875,
+    0.00945281982421875,
+    0.01088714599609375,
+    0.017669677734375,
+    0.01346588134765625,
+    0.0148468017578125,
+    0.017486572265625,
+    0.035919189453125,
+    0.030609130859375,
+    0.0135040283203125,
+    0.0103759765625,
+    0.01436614990234375,
+    0.02789306640625,
+    0.019287109375,
+    0.0103607177734375,
+    0.018157958984375,
+    0.0140533447265625,
+    0.0157928466796875,
+    0.019989013671875,
+    0.0209503173828125,
+    0.01015472412109375,
+    0.0234832763671875,
+    0.02301025390625
+  ],
+  "topk_size": 64,
+  "n_clusters": 64,
+  "cluster_stats": {
+    "0": {
+      "size": 4,
+      "selected_id": 339,
+      "max_uncertainty": 0.0201263427734375,
+      "mean_uncertainty": 0.0149078369140625
+    },
+    "1": {
+      "size": 4,
+      "selected_id": 344,
+      "max_uncertainty": 0.0113372802734375,
+      "mean_uncertainty": 0.0101776123046875
+    },
+    "2": {
+      "size": 4,
+      "selected_id": 431,
+      "max_uncertainty": 0.014129638671875,
+      "mean_uncertainty": 0.0122222900390625
+    },
+    "3": {
+      "size": 2,
+      "selected_id": 285,
+      "max_uncertainty": 0.0180206298828125,
+      "mean_uncertainty": 0.0142669677734375
+    },
+    "4": {
+      "size": 6,
+      "selected_id": 106,
+      "max_uncertainty": 0.016265869140625,
+      "mean_uncertainty": 0.0135955810546875
+    },
+    "5": {
+      "size": 5,
+      "selected_id": 253,
+      "max_uncertainty": 0.0251007080078125,
+      "mean_uncertainty": 0.01549530029296875
+    },
+    "6": {
+      "size": 3,
+      "selected_id": 455,
+      "max_uncertainty": 0.0119781494140625,
+      "mean_uncertainty": 0.0106048583984375
+    },
+    "7": {
+      "size": 2,
+      "selected_id": 453,
+      "max_uncertainty": 0.0165252685546875,
+      "mean_uncertainty": 0.016082763671875
+    },
+    "8": {
+      "size": 1,
+      "selected_id": 356,
+      "max_uncertainty": 0.01303863525390625,
+      "mean_uncertainty": 0.01303863525390625
+    },
+    "9": {
+      "size": 3,
+      "selected_id": 131,
+      "max_uncertainty": 0.01207733154296875,
+      "mean_uncertainty": 0.011260986328125
+    },
+    "10": {
+      "size": 4,
+      "selected_id": 311,
+      "max_uncertainty": 0.0177459716796875,
+      "mean_uncertainty": 0.013427734375
+    },
+    "11": {
+      "size": 6,
+      "selected_id": 145,
+      "max_uncertainty": 0.018524169921875,
+      "mean_uncertainty": 0.0153045654296875
+    },
+    "12": {
+      "size": 2,
+      "selected_id": 211,
+      "max_uncertainty": 0.03729248046875,
+      "mean_uncertainty": 0.035400390625
+    },
+    "13": {
+      "size": 4,
+      "selected_id": 426,
+      "max_uncertainty": 0.0190277099609375,
+      "mean_uncertainty": 0.01446533203125
+    },
+    "14": {
+      "size": 2,
+      "selected_id": 127,
+      "max_uncertainty": 0.017791748046875,
+      "mean_uncertainty": 0.017608642578125
+    },
+    "15": {
+      "size": 4,
+      "selected_id": 303,
+      "max_uncertainty": 0.0163421630859375,
+      "mean_uncertainty": 0.01213836669921875
+    },
+    "16": {
+      "size": 4,
+      "selected_id": 347,
+      "max_uncertainty": 0.0179901123046875,
+      "mean_uncertainty": 0.01317596435546875
+    },
+    "17": {
+      "size": 2,
+      "selected_id": 324,
+      "max_uncertainty": 0.0211944580078125,
+      "mean_uncertainty": 0.01641845703125
+    },
+    "18": {
+      "size": 8,
+      "selected_id": 389,
+      "max_uncertainty": 0.019927978515625,
+      "mean_uncertainty": 0.0161590576171875
+    },
+    "19": {
+      "size": 2,
+      "selected_id": 428,
+      "max_uncertainty": 0.016143798828125,
+      "mean_uncertainty": 0.0148773193359375
+    },
+    "20": {
+      "size": 1,
+      "selected_id": 75,
+      "max_uncertainty": 0.009552001953125,
+      "mean_uncertainty": 0.009552001953125
+    },
+    "21": {
+      "size": 3,
+      "selected_id": 374,
+      "max_uncertainty": 0.0194854736328125,
+      "mean_uncertainty": 0.0189056396484375
+    },
+    "22": {
+      "size": 2,
+      "selected_id": 270,
+      "max_uncertainty": 0.0126800537109375,
+      "mean_uncertainty": 0.0113525390625
+    },
+    "23": {
+      "size": 3,
+      "selected_id": 375,
+      "max_uncertainty": 0.01534271240234375,
+      "mean_uncertainty": 0.0118255615234375
+    },
+    "24": {
+      "size": 3,
+      "selected_id": 99,
+      "max_uncertainty": 0.01172637939453125,
+      "mean_uncertainty": 0.0104217529296875
+    },
+    "25": {
+      "size": 3,
+      "selected_id": 457,
+      "max_uncertainty": 0.0260009765625,
+      "mean_uncertainty": 0.0211944580078125
+    },
+    "26": {
+      "size": 2,
+      "selected_id": 298,
+      "max_uncertainty": 0.011688232421875,
+      "mean_uncertainty": 0.010498046875
+    },
+    "27": {
+      "size": 3,
+      "selected_id": 409,
+      "max_uncertainty": 0.024993896484375,
+      "mean_uncertainty": 0.0166473388671875
+    },
+    "28": {
+      "size": 1,
+      "selected_id": 319,
+      "max_uncertainty": 0.01277923583984375,
+      "mean_uncertainty": 0.01277923583984375
+    },
+    "29": {
+      "size": 4,
+      "selected_id": 264,
+      "max_uncertainty": 0.01258087158203125,
+      "mean_uncertainty": 0.01107025146484375
+    },
+    "30": {
+      "size": 1,
+      "selected_id": 289,
+      "max_uncertainty": 0.009521484375,
+      "mean_uncertainty": 0.009521484375
+    },
+    "31": {
+      "size": 3,
+      "selected_id": 74,
+      "max_uncertainty": 0.01386260986328125,
+      "mean_uncertainty": 0.01171875
+    },
+    "32": {
+      "size": 4,
+      "selected_id": 393,
+      "max_uncertainty": 0.023590087890625,
+      "mean_uncertainty": 0.02093505859375
+    },
+    "33": {
+      "size": 4,
+      "selected_id": 266,
+      "max_uncertainty": 0.016021728515625,
+      "mean_uncertainty": 0.0126495361328125
+    },
+    "34": {
+      "size": 3,
+      "selected_id": 465,
+      "max_uncertainty": 0.01194000244140625,
+      "mean_uncertainty": 0.0108795166015625
+    },
+    "35": {
+      "size": 3,
+      "selected_id": 429,
+      "max_uncertainty": 0.01132965087890625,
+      "mean_uncertainty": 0.01032257080078125
+    },
+    "36": {
+      "size": 2,
+      "selected_id": 396,
+      "max_uncertainty": 0.0117645263671875,
+      "mean_uncertainty": 0.01093292236328125
+    },
+    "37": {
+      "size": 3,
+      "selected_id": 92,
+      "max_uncertainty": 0.0175628662109375,
+      "mean_uncertainty": 0.01346588134765625
+    },
+    "38": {
+      "size": 2,
+      "selected_id": 225,
+      "max_uncertainty": 0.0307769775390625,
+      "mean_uncertainty": 0.02459716796875
+    },
+    "39": {
+      "size": 2,
+      "selected_id": 187,
+      "max_uncertainty": 0.019775390625,
+      "mean_uncertainty": 0.0147247314453125
+    },
+    "40": {
+      "size": 3,
+      "selected_id": 362,
+      "max_uncertainty": 0.023040771484375,
+      "mean_uncertainty": 0.01861572265625
+    },
+    "41": {
+      "size": 3,
+      "selected_id": 118,
+      "max_uncertainty": 0.018524169921875,
+      "mean_uncertainty": 0.0167694091796875
+    },
+    "42": {
+      "size": 1,
+      "selected_id": 335,
+      "max_uncertainty": 0.00945281982421875,
+      "mean_uncertainty": 0.00945281982421875
+    },
+    "43": {
+      "size": 2,
+      "selected_id": 85,
+      "max_uncertainty": 0.01088714599609375,
+      "mean_uncertainty": 0.010223388671875
+    },
+    "44": {
+      "size": 3,
+      "selected_id": 283,
+      "max_uncertainty": 0.017669677734375,
+      "mean_uncertainty": 0.01500701904296875
+    },
+    "45": {
+      "size": 2,
+      "selected_id": 404,
+      "max_uncertainty": 0.01346588134765625,
+      "mean_uncertainty": 0.011962890625
+    },
+    "46": {
+      "size": 2,
+      "selected_id": 201,
+      "max_uncertainty": 0.0148468017578125,
+      "mean_uncertainty": 0.0143280029296875
+    },
+    "47": {
+      "size": 1,
+      "selected_id": 473,
+      "max_uncertainty": 0.017486572265625,
+      "mean_uncertainty": 0.017486572265625
+    },
+    "48": {
+      "size": 3,
+      "selected_id": 219,
+      "max_uncertainty": 0.035919189453125,
+      "mean_uncertainty": 0.0310821533203125
+    },
+    "49": {
+      "size": 4,
+      "selected_id": 441,
+      "max_uncertainty": 0.030609130859375,
+      "mean_uncertainty": 0.0260467529296875
+    },
+    "50": {
+      "size": 1,
+      "selected_id": 206,
+      "max_uncertainty": 0.0135040283203125,
+      "mean_uncertainty": 0.0135040283203125
+    },
+    "51": {
+      "size": 1,
+      "selected_id": 129,
+      "max_uncertainty": 0.0103759765625,
+      "mean_uncertainty": 0.0103759765625
+    },
+    "52": {
+      "size": 3,
+      "selected_id": 196,
+      "max_uncertainty": 0.01436614990234375,
+      "mean_uncertainty": 0.01251220703125
+    },
+    "53": {
+      "size": 2,
+      "selected_id": 439,
+      "max_uncertainty": 0.02789306640625,
+      "mean_uncertainty": 0.02386474609375
+    },
+    "54": {
+      "size": 2,
+      "selected_id": 166,
+      "max_uncertainty": 0.019287109375,
+      "mean_uncertainty": 0.0162200927734375
+    },
+    "55": {
+      "size": 2,
+      "selected_id": 231,
+      "max_uncertainty": 0.0103607177734375,
+      "mean_uncertainty": 0.0098419189453125
+    },
+    "56": {
+      "size": 2,
+      "selected_id": 458,
+      "max_uncertainty": 0.018157958984375,
+      "mean_uncertainty": 0.0140838623046875
+    },
+    "57": {
+      "size": 1,
+      "selected_id": 353,
+      "max_uncertainty": 0.0140533447265625,
+      "mean_uncertainty": 0.0140533447265625
+    },
+    "58": {
+      "size": 1,
+      "selected_id": 421,
+      "max_uncertainty": 0.0157928466796875,
+      "mean_uncertainty": 0.0157928466796875
+    },
+    "59": {
+      "size": 1,
+      "selected_id": 269,
+      "max_uncertainty": 0.019989013671875,
+      "mean_uncertainty": 0.019989013671875
+    },
+    "60": {
+      "size": 2,
+      "selected_id": 209,
+      "max_uncertainty": 0.0209503173828125,
+      "mean_uncertainty": 0.016876220703125
+    },
+    "61": {
+      "size": 2,
+      "selected_id": 402,
+      "max_uncertainty": 0.01015472412109375,
+      "mean_uncertainty": 0.0098114013671875
+    },
+    "62": {
+      "size": 1,
+      "selected_id": 399,
+      "max_uncertainty": 0.0234832763671875,
+      "mean_uncertainty": 0.0234832763671875
+    },
+    "63": {
+      "size": 2,
+      "selected_id": 408,
+      "max_uncertainty": 0.02301025390625,
+      "mean_uncertainty": 0.0201416015625
+    }
+  },
+  "checkpoint_used": "experiments\\results\\v2ts_a_simple_huds\\checkpoints\\model_latest.pt"
+}

@@ -1,0 +1,137 @@
+{
+  "project_name": "V2V Complex - High-dimensional regression",
+  "random_seed": 42,
+  "variables": [
+    {
+      "name": "x_0",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_1",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_2",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_3",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_4",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_5",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_6",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_7",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_8",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_9",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_10",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    },
+    {
+      "name": "x_11",
+      "min": 0.0,
+      "max": 1.0,
+      "sample_points": 10,
+      "unit": ""
+    }
+  ],
+  "candidate_pool": {
+    "total_samples": 2000,
+    "train_ratio": 0.8,
+    "validation_ratio": 0.2
+  },
+  "model": {
+    "model_type": "vector_to_vector",
+    "output_names": [
+      "y_0",
+      "y_1",
+      "y_2",
+      "y_3"
+    ],
+    "hidden_dim": 256,
+    "encoder_blocks": 4,
+    "dropout": 0.1,
+    "seq_len": 50,
+    "decoder_layers": 2,
+    "img_h": 32,
+    "img_w": 32,
+    "channels": 1,
+    "decoder_blocks": 3
+  },
+  "validation": {
+    "default_size": 1000
+  },
+  "training": {
+    "initial_train_size": 200,
+    "sample_per_step": 64,
+    "max_steps": 10,
+    "epochs_per_step": 100,
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "patience": 20,
+    "device": "cpu",
+    "retrain_from_scratch": false,
+    "restore_optimizer_state": true
+  },
+  "huds": {
+    "pre_n": 0,
+    "repeat_times": 20,
+    "topk_ratio": 0.6,
+    "batch_size": 256,
+    "use_faiss": false,
+    "use_top_p": false,
+    "top_p_threshold": 0.9
+  }
+}

@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from huds_app.config import (
+from huds_app.core.config import (
     AppConfig,
     CandidatePoolConfig,
     HUDSConfig,
@@ -137,3 +137,38 @@ class TestValidateConfigHiddenDim:
 
         with pytest.raises(ValueError, match="hidden_dim"):
             load_config(path)
+
+
+class TestValidateConfigTopPThreshold:
+    def test_top_p_threshold_zero_raises(self):
+        cfg = _valid_config_dict()
+        cfg["huds"] = {"use_top_p": True, "top_p_threshold": 0.0}
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            path = f.name
+
+        with pytest.raises(ValueError, match="top_p_threshold"):
+            load_config(path)
+
+    def test_top_p_threshold_over_one_raises(self):
+        cfg = _valid_config_dict()
+        cfg["huds"] = {"use_top_p": True, "top_p_threshold": 1.5}
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            path = f.name
+
+        with pytest.raises(ValueError, match="top_p_threshold"):
+            load_config(path)
+
+    def test_top_p_disabled_allows_any_threshold(self):
+        cfg = _valid_config_dict()
+        cfg["huds"] = {"use_top_p": False, "top_p_threshold": 1.5}
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(cfg, f)
+            path = f.name
+
+        result = load_config(path)
+        assert result.huds.use_top_p is False

@@ -19,22 +19,22 @@ import pandas as pd
 import pytest
 
 # Import the modules under test
-from huds_app.config import (
-    AppConfig, 
-    CandidatePoolConfig, 
-    HUDSConfig, 
-    ModelConfig, 
+from huds_app.core.config import (
+    AppConfig,
+    CandidatePoolConfig,
+    HUDSConfig,
+    ModelConfig,
     TrainingConfig,
     VariableConfig,
     ValidationConfig,
 )
-from huds_app.huds import run_huds_sampling
-from huds_app.sampling import create_candidate_pool, save_pool_files, split_pool
-from huds_app.storage import RunState, ensure_run_dir, read_csv, write_csv
-from huds_app.train import train_model
-from huds_app.validation import (
+from huds_app.sampling.huds import run_huds_sampling
+from huds_app.data.pool import create_candidate_pool, save_pool_files, split_pool
+from huds_app.core.storage import RunState, ensure_run_dir, read_csv, write_csv
+from huds_app.model.train import train_model
+from huds_app.data.validation import (
     export_initial_train_request,
-    export_validation_request, 
+    export_validation_request,
     import_labels,
 )
 
@@ -57,7 +57,7 @@ def test_config():
         model=ModelConfig(
             output_names=["y1", "y2"],
             hidden_dim=32,   # Tiny model
-            residual_blocks=1,
+            encoder_blocks=1,
             dropout=0.2,
         ),
         validation=ValidationConfig(default_size=50),
@@ -72,7 +72,6 @@ def test_config():
             device="cpu",  # Force CPU for test portability
         ),
         huds=HUDSConfig(
-            pre_n=0,
             repeat_times=5,   # Fast MC dropout
             topk_ratio=0.7,
             batch_size=64,
@@ -332,7 +331,7 @@ class TestEndToEndWorkflow:
         
         FIX 1 verification: Workflow state machine correctly progresses to next phase.  
         """
-        from huds_app.workflow import show_status
+        from huds_app.interface.workflow import show_status
         
         status = show_status(run_dir)
         
@@ -378,13 +377,15 @@ class TestCLICommands:
         Note: Full argparse integration tested separately; this verifies the function signature.  
         """
         # First export another train request to have a valid step N to import against  
-        from huds_app.sampling import create_candidate_pool, split_pool
+        from huds_app.data.pool import create_candidate_pool, split_pool
         
         pool_df = create_candidate_pool(test_config)
         train_df, _ = split_pool(pool_df, test_config, test_config.random_seed)
         
-        # Export step 2 request for testing partial imports 
-        export_initial_train_request(run_dir, test_config)  
+        # Export initial train request (skip if already exported by prior tests - FIX 02 idempotency)
+        state = RunState.load(run_dir)
+        if "0" not in state.train_requests:
+            export_initial_train_request(run_dir, test_config)  
         
         # Create minimal partial output (only 5 rows instead of all)
         train_request_0 = read_csv(f"{run_dir}/requests/train_step_000_request.csv")

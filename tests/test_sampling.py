@@ -4,8 +4,8 @@ import pytest
 import numpy as np
 import pandas as pd
 
-from huds_app.config import AppConfig, VariableConfig, CandidatePoolConfig
-from huds_app.sampling import create_candidate_pool
+from huds_app.core.config import AppConfig, VariableConfig, CandidatePoolConfig
+from huds_app.data.pool import create_candidate_pool
 
 
 @pytest.fixture
