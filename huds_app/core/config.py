@@ -3,11 +3,106 @@
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
+
+# Maxwell FEM common unit presets for parametric table export.
+# Keys are preset names (case-insensitive), values are Maxwell unit strings.
+MAXWELL_UNIT_PRESETS: Dict[str, str] = {
+    # Current
+    "A": "A",
+    "ampere": "A",
+    "current": "A",
+    # Frequency
+    "Hz": "Hz",
+    "hertz": "Hz",
+    "frequency": "Hz",
+    # Length
+    "mm": "mm",
+    "millimeter": "mm",
+    "m": "m",
+    "meter": "m",
+    "cm": "cm",
+    "centimeter": "cm",
+    "um": "um",
+    "micrometer": "um",
+    # Velocity
+    "km_per_hour": "km_per_hour",
+    "kmh": "km_per_hour",
+    "m_per_sec": "m_per_sec",
+    "mps": "m_per_sec",
+    "velocity": "km_per_hour",
+    "speed": "km_per_hour",
+    # Voltage
+    "V": "V",
+    "volt": "V",
+    "voltage": "V",
+    # Resistance
+    "Ohm": "Ohm",
+    "ohm": "Ohm",
+    "resistance": "Ohm",
+    # Magnetic
+    "T": "T",
+    "tesla": "T",
+    "mT": "mT",
+    "millitesla": "mT",
+    "Gauss": "Gauss",
+    "gauss": "Gauss",
+    # Force
+    "N": "N",
+    "newton": "N",
+    "force": "N",
+    # Torque
+    "Nm": "Nm",
+    "newton_meter": "Nm",
+    "torque": "Nm",
+    # Power
+    "W": "W",
+    "watt": "W",
+    "power": "W",
+    "kW": "kW",
+    "kilowatt": "kW",
+    # Temperature
+    "C": "C",
+    "celsius": "C",
+    "K": "K",
+    "kelvin": "K",
+    # Pressure
+    "Pa": "Pa",
+    "pascal": "Pa",
+    "MPa": "MPa",
+    "kPa": "kPa",
+    # Area
+    "mm2": "mm2",
+    "m2": "m2",
+    # Volume
+    "mm3": "mm3",
+    "m3": "m3",
+}
+
+
+def resolve_maxwell_unit(raw: str) -> str:
+    """Resolve a unit string to its Maxwell preset value.
+
+    Returns the raw string unchanged if it's not a known preset name.
+    Preset lookup is case-insensitive.
+    """
+    if not raw or not raw.strip():
+        return raw
+    stripped = raw.strip()
+    # Direct match first (exact unit string like "mm", "km_per_hour")
+    if stripped in MAXWELL_UNIT_PRESETS.values():
+        return stripped
+    # Case-insensitive preset name lookup
+    lower = stripped.lower()
+    if lower in MAXWELL_UNIT_PRESETS:
+        return MAXWELL_UNIT_PRESETS[lower]
+    # Not a preset, return as-is (user-defined unit)
+    return stripped
 
 
 class ModelType(str, Enum):
     """Model architecture type selector."""
+
     VECTOR_TO_VECTOR = "vector_to_vector"
     VECTOR_TO_TIME_SERIES = "vector_to_time_series"
     VECTOR_TO_IMAGE = "vector_to_image"
@@ -21,6 +116,9 @@ class VariableConfig:
     sample_points: int
     unit: str = ""
 
+    def resolved_unit(self) -> str:
+        """Return the unit resolved through Maxwell presets."""
+        return resolve_maxwell_unit(self.unit)
 
 @dataclass
 class CandidatePoolConfig:

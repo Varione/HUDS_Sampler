@@ -80,9 +80,9 @@ def _resolve_units(
     units: dict[str, str] = {}
 
     config_units = {
-        variable.name: variable.unit.strip()
+        variable.name: variable.resolved_unit()
         for variable in (config.variables if config is not None else [])
-        if variable.unit.strip()
+        if variable.resolved_unit()
     }
 
     for column in variable_columns:

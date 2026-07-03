@@ -9,11 +9,13 @@ from huds_app.core.config import (
     AppConfig,
     CandidatePoolConfig,
     HUDSConfig,
+    MAXWELL_UNIT_PRESETS,
     ModelConfig,
     TrainingConfig,
     VariableConfig,
     ValidationConfig,
     load_config,
+    resolve_maxwell_unit,
     validate_config,
 )
 
@@ -172,3 +174,72 @@ class TestValidateConfigTopPThreshold:
 
         result = load_config(path)
         assert result.huds.use_top_p is False
+
+
+class TestMaxwellUnitPresets:
+    """Test Maxwell unit preset resolution."""
+
+    def test_exact_unit_string_passthrough(self):
+        """Exact unit string (mm, Hz, A) should pass through unchanged."""
+        assert resolve_maxwell_unit("mm") == "mm"
+        assert resolve_maxwell_unit("Hz") == "Hz"
+        assert resolve_maxwell_unit("A") == "A"
+        assert resolve_maxwell_unit("km_per_hour") == "km_per_hour"
+
+    def test_preset_name_resolution(self):
+        """Preset names should resolve to Maxwell unit strings."""
+        assert resolve_maxwell_unit("millimeter") == "mm"
+        assert resolve_maxwell_unit("hertz") == "Hz"
+        assert resolve_maxwell_unit("ampere") == "A"
+        assert resolve_maxwell_unit("kmh") == "km_per_hour"
+        assert resolve_maxwell_unit("mps") == "m_per_sec"
+
+    def test_case_insensitive_lookup(self):
+        """Preset lookup should be case-insensitive."""
+        assert resolve_maxwell_unit("MM") == "mm"
+        assert resolve_maxwell_unit("MILLIMETER") == "mm"
+        assert resolve_maxwell_unit("Hertz") == "Hz"
+        assert resolve_maxwell_unit("KM_PER_HOUR") == "km_per_hour"
+
+    def test_empty_string_returns_empty(self):
+        """Empty string should return empty."""
+        assert resolve_maxwell_unit("") == ""
+        assert resolve_maxwell_unit("  ") == "  "
+
+    def test_unknown_unit_passthrough(self):
+        """Unknown unit strings should pass through unchanged."""
+        assert resolve_maxwell_unit("custom_unit") == "custom_unit"
+        assert resolve_maxwell_unit("rad/s") == "rad/s"
+
+    def test_variable_config_resolved_unit(self):
+        """VariableConfig.resolved_unit() should apply preset resolution."""
+        v = VariableConfig(name="gap", min=0, max=10, sample_points=5, unit="millimeter")
+        assert v.resolved_unit() == "mm"
+
+        v2 = VariableConfig(name="freq", min=1, max=100, sample_points=10, unit="hertz")
+        assert v2.resolved_unit() == "Hz"
+
+        v3 = VariableConfig(name="speed", min=0, max=50, sample_points=10, unit="kmh")
+        assert v3.resolved_unit() == "km_per_hour"
+
+    def test_all_maxwell_presets_defined(self):
+        """Verify all expected Maxwell presets are defined."""
+        # Check key categories are present
+        assert "A" in MAXWELL_UNIT_PRESETS
+        assert "Hz" in MAXWELL_UNIT_PRESETS
+        assert "mm" in MAXWELL_UNIT_PRESETS
+        assert "km_per_hour" in MAXWELL_UNIT_PRESETS
+        assert "V" in MAXWELL_UNIT_PRESETS
+        assert "Ohm" in MAXWELL_UNIT_PRESETS
+        assert "N" in MAXWELL_UNIT_PRESETS
+        assert "Nm" in MAXWELL_UNIT_PRESETS
+
+    def test_config_load_with_preset_unit(self, tmp_path):
+        """Config with preset unit names should resolve correctly."""
+        cfg = _valid_config_dict()
+        cfg["variables"][0]["unit"] = "millimeter"
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps(cfg))
+
+        result = load_config(str(config_path))
+        assert result.variables[0].resolved_unit() == "mm"
