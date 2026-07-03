@@ -401,7 +401,7 @@ def import_labels(
         raise ValueError("Invalid simulator output: " + "; ".join(errors))
 
     labeled_df = simulator_df[_labeled_columns(config)].copy()
-    incoming_ids = set(_column(labeled_df, SAMPLE_ID_COLUMN).tolist())
+    incoming_ids = {_normalize_sample_id(sid) for sid in _column(labeled_df, SAMPLE_ID_COLUMN).tolist()}
 
     # --- 2. Read existing labeled data for cumulative check (P1 FIX B) ---
     #     If overwrite=True, the file will be replaced so only incoming counts.
@@ -409,11 +409,11 @@ def import_labels(
     if overwrite or not output_path.exists():
         existing_labeled_ids: set[object] = set()
     else:
-        existing_labeled_ids = set(read_csv(output_path)[SAMPLE_ID_COLUMN].tolist())
+        existing_labeled_ids = {_normalize_sample_id(sid) for sid in read_csv(output_path)[SAMPLE_ID_COLUMN].tolist()}
 
     # --- 3. Validate completeness BEFORE any file writes (P1 FIX A) ---
     step_key = str(int(step)) if kind == "train" and step is not None else None
-    requested_ids = set(_column(request_df, SAMPLE_ID_COLUMN).tolist())
+    requested_ids = {_normalize_sample_id(sid) for sid in _column(request_df, SAMPLE_ID_COLUMN).tolist()}
     pending_missing = _validate_import_completeness(
         requested_ids, existing_labeled_ids, incoming_ids, allow_partial, step_key
     )

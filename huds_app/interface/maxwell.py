@@ -97,10 +97,24 @@ def _resolve_units(
 
 
 def _format_maxwell_value(value: Any, unit: str) -> str:
+    # Reject NaN / Inf before Decimal conversion (Decimal accepts them silently).
+    import math
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            raise ValueError(
+                f"Cannot format non-numeric value '{value}' for Maxwell export"
+            )
+
     try:
         decimal_value = Decimal(str(value))
     except (InvalidOperation, ValueError) as error:
         raise ValueError(f"Cannot format non-numeric value '{value}' for Maxwell export") from error
+
+    # Double-check: Decimal may have produced NaN/Inf from string input.
+    if not decimal_value.is_finite():
+        raise ValueError(
+            f"Cannot format non-numeric value '{value}' for Maxwell export"
+        )
 
     normalized = format(decimal_value.normalize(), "f")
     if "." in normalized:

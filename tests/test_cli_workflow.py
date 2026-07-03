@@ -442,7 +442,8 @@ class TestCumulativePartialImport:
         export_initial_train_request(run_dir, test_config)
 
         request_df = read_csv(f"{run_dir}/requests/train_step_000_request.csv")
-        requested_ids = set(request_df["sample_id"].tolist())
+        from huds_app.core.storage import _normalize_sample_id
+        requested_ids = {_normalize_sample_id(sid) for sid in request_df["sample_id"].tolist()}
         assert len(requested_ids) == 5, f"Expected 5 request IDs, got {len(requested_ids)}"
 
         # Verify pending was populated by export
@@ -493,7 +494,7 @@ class TestCumulativePartialImport:
         assert len(labeled_df) >= 5, f"Expected at least 5 labeled rows, got {len(labeled_df)}"
 
         # 4. All requested IDs must appear in the labeled dataset
-        labeled_ids = set(labeled_df["sample_id"].tolist())
+        labeled_ids = {_normalize_sample_id(sid) for sid in labeled_df["sample_id"].tolist()}
         assert requested_ids.issubset(labeled_ids), \
             f"Some requested IDs missing from labeled data: {requested_ids - labeled_ids}"
 

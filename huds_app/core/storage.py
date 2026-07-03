@@ -173,7 +173,10 @@ def read_csv(path: str | Path) -> pd.DataFrame:
         raise ValueError(f"CSV path is not a file: {csv_path}")
 
     try:
-        return pd.read_csv(csv_path)
+        # Read sample_id as string to preserve precision for large integers (>2^53).
+        # pandas default float64 truncates values beyond 2^53.
+        df = pd.read_csv(csv_path, dtype={"sample_id": str})
+        return df
     except pd.errors.EmptyDataError as error:
         raise ValueError(f"CSV file is empty: {csv_path}") from error
     except pd.errors.ParserError as error:

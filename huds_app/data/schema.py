@@ -126,7 +126,12 @@ def validate_values(df: pd.DataFrame, required_columns: Sequence[str]) -> List[s
 
 
 def validate_sample_ids(df: pd.DataFrame, valid_ids: Iterable[object]) -> List[str]:
-    """Validate sample_id uniqueness and membership in the supplied id set."""
+    """Validate sample_id uniqueness and membership in the supplied id set.
+
+    Normalizes sample_id values before comparison so string IDs from CSV read
+    match int IDs registered by _register_request_ids.
+    """
+    from huds_app.core.storage import _normalize_sample_id
 
     errors: List[str] = []
     if SAMPLE_ID_COLUMN not in df.columns:
@@ -142,7 +147,8 @@ def validate_sample_ids(df: pd.DataFrame, valid_ids: Iterable[object]) -> List[s
         errors.append(f"Column {SAMPLE_ID_COLUMN} contains duplicate id(s): {duplicate_values}")
 
     valid_id_set = set(valid_ids)
-    invalid_values = sample_ids[~sample_ids.isin(valid_id_set)].dropna().unique().tolist()
+    normalized_ids = sample_ids.apply(_normalize_sample_id)
+    invalid_values = normalized_ids[~normalized_ids.isin(valid_id_set)].dropna().unique().tolist()
     if invalid_values:
         errors.append(f"Column {SAMPLE_ID_COLUMN} contains unknown id(s): {invalid_values}")
 
