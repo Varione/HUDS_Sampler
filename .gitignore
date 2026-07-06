@@ -55,3 +55,7 @@ metrics/
 
 # Diagnostics from HUDS sampling
 diagnostics/
+
+# Experiment results and benchmarks
+experiments/results/
+experiments/__pycache__/
