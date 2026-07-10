@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -8,6 +10,39 @@ from typing import Any, Optional
 
 import pandas as pd
 import torch
+
+# Try to import filelock; if not available, create a dummy lock class
+try:
+    from filelock import FileLock
+except ImportError:
+    # Dummy implementation for systems without filelock
+    class FileLock:
+        def __init__(self, lock_file: str | Path, timeout: float = 10):
+            self.lock_path = Path(lock_file)
+            self.timeout = timeout
+
+        def acquire(self):
+            while not self.lock_path.exists():
+                try:
+                    self.lock_path.touch()
+                    return
+                except FileExistsError:
+                    pass
+                import time
+                time.sleep(0.1)
+
+        def release(self):
+            try:
+                self.lock_path.unlink()
+            except OSError:
+                pass
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            self.release()
 
 
 def resolve_device(config_device: str) -> torch.device:
@@ -44,6 +79,29 @@ def resolve_device(config_device: str) -> torch.device:
         return torch.device("cpu")
 
 
+def atomic_write_json(path: Path, data: dict) -> None:
+    """Write JSON atomically using temporary file and replace."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write to temporary file in same directory for atomic rename
+    fd, tmp_path = tempfile.mkstemp(suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, str(path))
+    except Exception:
+        # Clean up temp file on error
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def _normalize_sample_id(value: Any) -> int | str:
     """Normalize sample_id to consistent int or str type.
 
@@ -71,6 +129,18 @@ def _normalize_sample_id(value: Any) -> int | str:
         return int(value)
     except (ValueError, TypeError):
         return str(value)
+
+
+def run_directory_lock(run_dir: str | Path, timeout: float = 300) -> FileLock:
+    """Return a file lock for the run directory."""
+    run_path = Path(run_dir)
+    if not run_path.exists():
+        raise FileNotFoundError(f"Run directory not found: {run_path}")
+    if not run_path.is_dir():
+        raise ValueError(f"Run path is not a directory: {run_path}")
+
+    lock_file = run_path / ".huds.lock"
+    return FileLock(str(lock_file), timeout=timeout)
 
 
 _RUN_SUBDIRS = ("requests", "datasets", "checkpoints", "metrics", "artifacts")
@@ -121,9 +191,8 @@ class RunState:
             raise ValueError(f"Run directory path is not a directory: {run_path}")
         run_path.mkdir(parents=True, exist_ok=True)
 
-        with self.state_path.open("w", encoding="utf-8") as file:
-            json.dump(asdict(self), file, indent=2)
-            file.write("\n")
+        # Use atomic write to prevent corruption on interruption
+        atomic_write_json(self.state_path, asdict(self))
 
 
 def ensure_run_dir(run_dir: str) -> Path:

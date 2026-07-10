@@ -443,15 +443,40 @@ def _make_arrays(df: pd.DataFrame, var_cols: list[str], out_cols: list[str], nor
 
 
 def _save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer, metrics: dict[str, float], path: Path) -> None:
+    """Save checkpoint with full metadata for reproducibility and recovery."""
+    import sys
+    import os
+    import platform
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "metrics": metrics,
-        },
-        path,
-    )
+
+    # FIX 18: Include comprehensive metadata for reproducibility
+    checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "metrics": metrics,
+        "format_version": 1,
+        "python_version": sys.version,
+        "torch_version": torch.__version__,
+        "numpy_version": np.__version__,
+        "os_platform": platform.platform(),
+        "git_commit": None,  # Could be added if repository is available
+    }
+
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.dirname(__file__)),  # Assume repo root relative to train.py
+        )
+        if result.returncode == 0:
+            checkpoint["git_commit"] = result.stdout.strip()
+    except Exception:
+        pass
+
+    torch.save(checkpoint, path)
 
 
 def _move_optimizer_to_device(optimizer: torch.optim.Optimizer, device: torch.device) -> None:

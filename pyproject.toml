@@ -20,7 +20,7 @@ fast = ["faiss-cpu"]
 test = ["pytest"]
 
 [project.scripts]
-huds-app = "huds_app.cli:main"
+huds-app = "huds_app.interface.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["huds_app*"]

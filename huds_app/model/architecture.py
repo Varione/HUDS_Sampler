@@ -188,16 +188,19 @@ class TransposedConvBlock(nn.Module):
 
 
 class ImageDecoder(nn.Module):
-    """Multi-stage transposed-conv decoder.
+    """Multi-stage transposed-conv decoder with size restoration.
 
     Reshapes a 1D embedding into a small latent feature map and
-    progressively upsamples to (img_h, img_w).
+    progressively upsamples, then interpolates to target (img_h, img_w).
 
     Architecture:
         Linear(hidden_dim -> latent_ch * latent_h * latent_w)
         -> Reshape(latent_ch, latent_h, latent_w)
         -> [TransposedConvBlock] * num_blocks  (each doubles spatial size)
+        -> Interpolate to target size
         -> Conv2d(latent_ch // 2^(num_blocks-1) -> channels, 1)
+
+    FIX 6: Ensures output size matches img_h x img_w by interpolating after decoder.
     """
 
     def __init__(
@@ -239,12 +242,26 @@ class ImageDecoder(nn.Module):
         # Final 1x1 conv to exact channel count.
         self.final_conv = nn.Conv2d(prev_ch, channels, 1)
 
+        # FIX 6: Store target size for interpolation after decoder
+        self.img_h = img_h
+        self.img_w = img_w
+
     def forward(self, embedding: torch.Tensor) -> torch.Tensor:
         b = embedding.shape[0]
         x = self.flatten_proj(embedding)
         x = x.view(b, *self.latent_shape)
         x = self.blocks(x)
         x = self.final_conv(x)
+
+        # FIX 6: Ensure output size matches target by interpolation
+        if (x.shape[2], x.shape[3]) != (self.img_h, self.img_w):
+            x = F.interpolate(
+                x,
+                size=(self.img_h, self.img_w),
+                mode="bilinear",
+                align_corners=False,
+            )
+
         return x
 
 
