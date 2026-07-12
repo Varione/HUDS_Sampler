@@ -152,25 +152,29 @@ def test_mc_dropout_output_path():
         return False
 
 def test_mc_dropout_state_restoration():
-    """P0: Model training state is restored after mc_dropout_predict."""
+    """P0: Per-module training state is restored after mc_dropout_predict."""
     import torch
-    from huds_app.model.architecture import VectorToVector
+    from huds_app.model.architecture import VectorToImage
     from huds_app.sampling.huds import mc_dropout_predict
 
     try:
-        model = VectorToVector(input_dim=8, hidden_dim=16, output_dim=4, encoder_blocks=2, dropout=0.1)
+        # Use VectorToImage which contains BatchNorm2d to test per-module restoration
+        model = VectorToImage(input_dim=8, hidden_dim=16, encoder_blocks=2, dropout=0.1, img_h=16, img_w=16, channels=1, decoder_blocks=2)
         x = torch.randn(4, 8)
 
         # Test restoration from eval mode
         model.eval()
         mc_dropout_predict(model, x, repeat_times=3, batch_size=2, return_outputs=False)
-        assert not model.training, "Model should remain in eval after MC Dropout (was eval)"
+        for m in model.modules():
+            assert not m.training, f"Module {type(m).__name__} should be in eval after MC Dropout"
 
         # Test restoration from train mode
         model.train()
         mc_dropout_predict(model, x, repeat_times=3, batch_size=2, return_outputs=False)
-        assert model.training, "Model should be restored to train after MC Dropout (was train)"
-        print("[PASS] MC Dropout correctly restores model training state")
+        for m in model.modules():
+            assert m.training, f"Module {type(m).__name__} should be restored to train after MC Dropout"
+
+        print("[PASS] MC Dropout correctly restores per-module training state")
         return True
     except Exception as e:
         print(f"[FAIL] MC Dropout state restoration failed: {e}")

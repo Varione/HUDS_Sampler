@@ -47,8 +47,8 @@ def mc_dropout_predict(model, x, repeat_times, batch_size, return_outputs: bool 
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
 
-    # Save original training state of each module for correct restoration
-    was_training = model.training
+    # Save per-module training state for exact restoration after MC Dropout
+    original_states = {m: m.training for m in model.modules()}
     pred_mean = None
 
     _enable_mc_dropout(model)
@@ -91,12 +91,14 @@ def mc_dropout_predict(model, x, repeat_times, batch_size, return_outputs: bool 
         pred_mean = outputs.mean(dim=0).numpy()  # (n, output_dim)
         output_var = outputs.var(dim=0)  # (n, output_dim) using population variance
 
-        # FIX 3: Normalize uncertainty by output dimension variance to prevent
-        # large-scale outputs from dominating uncertainty estimation.
-        # U_i = (1/D) * sum_d Var(y_{i,d}) / (Var(y_{i,d}).mean() + epsilon)
-        D = output_var.shape[1]
+        # Normalize uncertainty per output dimension.
+        # Model outputs are in standardized space (training targets were normalized),
+        # so variances across dimensions are already roughly comparable.
+        # We still normalize by each dimension's mean MC variance to handle cases where
+        # the candidate pool is in an OOD region and some dimensions show uniformly
+        # higher uncertainty than others.
+        # U_i = (1/D) * sum_d Var(y_{i,d}) / (mean_j Var(y_{j,d}) + epsilon)
         epsilon = 1e-8
-        # Normalize each dimension by the mean variance across all samples for that dimension
         dim_scale = output_var.mean(dim=0).clamp(min=epsilon)
         normalized_var = output_var / dim_scale[None, :]
         uncertainties = normalized_var.mean(dim=1).numpy()
@@ -106,10 +108,9 @@ def mc_dropout_predict(model, x, repeat_times, batch_size, return_outputs: bool 
         uncertainties = embeddings.var(axis=0).mean(axis=1)
 
 
-    if was_training:
-        model.train()
-    else:
-        model.eval()
+    # Restore exact per-module training state (handles BatchNorm, LayerNorm etc.)
+    for module, state in original_states.items():
+        module.training = state
 
     return embeddings, uncertainties, pred_mean
 
