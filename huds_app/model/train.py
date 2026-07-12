@@ -267,11 +267,11 @@ def train_model(run_dir: str | Path, config: Any, progress_cb: Any | None = None
     artifacts_dir = run_path / "artifacts"
 
     train_df = read_csv(datasets_dir / "train_labeled.csv")
-    val_df = read_csv(datasets_dir / "validation_labeled.csv")
+    val_df = read_csv(datasets_dir / "val_labeled.csv")
     var_cols = [variable.name for variable in config.variables]
     out_cols = list(config.model.output_names)
     _validate_columns(train_df, var_cols + out_cols, datasets_dir / "train_labeled.csv")
-    _validate_columns(val_df, var_cols + out_cols, datasets_dir / "validation_labeled.csv")
+    _validate_columns(val_df, var_cols + out_cols, datasets_dir / "val_labeled.csv")
 
     normalization_path = artifacts_dir / "normalization.json"
     if normalization_path.exists():

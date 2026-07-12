@@ -150,15 +150,13 @@ _RUN_SUBDIRS = ("requests", "datasets", "checkpoints", "metrics", "artifacts")
 class RunState:
     run_dir: str
     current_step: int = 0
-    validation_request_created: bool = False
-    validation_labeled: bool = False
-    validation_requests: dict[str, dict[str, str]] = field(default_factory=dict)
     train_requests: dict[str, dict[str, str]] = field(default_factory=dict)
     latest_checkpoint: Optional[str] = None
     best_checkpoint: Optional[str] = None
     trained_step: int = -1
     used_sample_ids: list[Any] = field(default_factory=list)
     pending_sample_ids: list[Any] = field(default_factory=list)
+    split_assignments: dict[str, dict[str, list]] = field(default_factory=dict)
 
     @property
     def state_path(self) -> Path:

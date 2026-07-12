@@ -177,8 +177,11 @@ if PYDANTIC_AVAILABLE:
 
     class CandidatePoolConfigPydantic(BaseModel):
         total_samples: int = Field(default=1000, gt=0)
-        train_ratio: float = Field(default=0.8, gt=0, le=1)
-        validation_ratio: float = Field(default=0.2, gt=0, le=1)
+
+    class SplitConfigPydantic(BaseModel):
+        train_split: float = Field(default=0.8, gt=0, le=1)
+        val_split: float = Field(default=0.1, ge=0, le=1)
+        test_split: float = Field(default=0.1, ge=0, le=1)
 
     class ValidationConfigPydantic(BaseModel):
         default_size: int = Field(default=1000, gt=0)
@@ -190,6 +193,7 @@ else:
     HUDSConfigPydantic = None  # type: ignore
     ModelConfigPydantic = None  # type: ignore
     CandidatePoolConfigPydantic = None  # type: ignore
+    SplitConfigPydantic = None  # type: ignore
     ValidationConfigPydantic = None  # type: ignore
 
 
@@ -209,8 +213,13 @@ class VariableConfig:
 @dataclass
 class CandidatePoolConfig:
     total_samples: int = 1000
-    train_ratio: float = 0.8
-    validation_ratio: float = 0.2
+
+
+@dataclass
+class SplitConfig:
+    train_split: float = 0.8
+    val_split: float = 0.1
+    test_split: float = 0.1
 
 
 @dataclass
@@ -290,6 +299,7 @@ class AppConfig:
     random_seed: int = 42
     variables: List[VariableConfig] = field(default_factory=list)
     candidate_pool: CandidatePoolConfig = field(default_factory=lambda: CandidatePoolConfig())
+    split: SplitConfig = field(default_factory=lambda: SplitConfig())
     model: ModelConfig = field(default_factory=lambda: ModelConfig())
     validation: ValidationConfig = field(default_factory=lambda: ValidationConfig())
     training: TrainingConfig = field(default_factory=lambda: TrainingConfig())
@@ -338,6 +348,7 @@ def load_config(path: str) -> AppConfig:
         random_seed=raw.get("random_seed", 42),
         variables=[_from_dict(VariableConfig, v) for v in raw.get("variables", [])],
         candidate_pool=_from_dict(CandidatePoolConfig, raw.get("candidate_pool", {})),
+        split=_from_dict(SplitConfig, raw.get("split", {})),
         model=_from_dict(ModelConfig, raw.get("model", {})),
         validation=_from_dict(ValidationConfig, raw.get("validation", {})),
         training=_from_dict(TrainingConfig, raw.get("training", {})),
@@ -382,12 +393,14 @@ def validate_config(config: AppConfig) -> None:
     if config.candidate_pool.total_samples <= 0:
         raise ValueError("candidate_pool.total_samples must be > 0")
 
-    ratio_sum = config.candidate_pool.train_ratio + config.candidate_pool.validation_ratio
-    if abs(ratio_sum - 1.0) > 1e-6:
+    split_sum = config.split.train_split + config.split.val_split + config.split.test_split
+    if abs(split_sum - 1.0) > 1e-6:
         raise ValueError(
-            f"candidate_pool train_ratio + validation_ratio must equal 1.0 "
-            f"(got {ratio_sum})"
+            f"split train_split + val_split + test_split must equal 1.0 "
+            f"(got {split_sum})"
         )
+    if config.split.train_split <= 0:
+        raise ValueError("split.train_split must be > 0")
 
     # Model type validation
     valid_types = {t.value for t in ModelType}
@@ -449,8 +462,11 @@ def inspect_config(config: AppConfig) -> None:
     print()
     print("Candidate pool:")
     print(f"  total_samples={config.candidate_pool.total_samples}")
-    print(f"  train_ratio={config.candidate_pool.train_ratio}")
-    print(f"  validation_ratio={config.candidate_pool.validation_ratio}")
+    print()
+    print("Split:")
+    print(f"  train_split={config.split.train_split}")
+    print(f"  val_split={config.split.val_split}")
+    print(f"  test_split={config.split.test_split}")
     print()
     print("Model:")
     print(f"  model_type={config.model.model_type}")

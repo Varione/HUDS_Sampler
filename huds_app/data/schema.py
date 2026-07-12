@@ -26,29 +26,20 @@ class SchemaDefinition:
 
 
 SAMPLE_ID_COLUMN = "sample_id"
-SPLIT_COLUMN = "split"
 STATUS_COLUMN = "status"
+SPLIT_ASSIGNMENT_COLUMN = "split_assignment"
 
-KNOWN_METADATA_COLUMNS = [SAMPLE_ID_COLUMN, SPLIT_COLUMN, STATUS_COLUMN]
-VALID_SPLITS = ["train_pool", "validation_pool"]
+KNOWN_METADATA_COLUMNS = [SAMPLE_ID_COLUMN, STATUS_COLUMN]
 VALID_STATUSES = ["unlabeled", "selected", "labeled", "used"]
+VALID_SPLIT_ASSIGNMENTS = ["train", "val", "test"]
 
 
 candidate_pool = SchemaDefinition(
     name="candidate_pool",
     columns=[
         ColumnSpec(SAMPLE_ID_COLUMN),
-        ColumnSpec(SPLIT_COLUMN),
         ColumnSpec(STATUS_COLUMN),
     ],
-)
-train_pool = SchemaDefinition(
-    name="train_pool",
-    columns=[ColumnSpec(SAMPLE_ID_COLUMN)],
-)
-validation_pool = SchemaDefinition(
-    name="validation_pool",
-    columns=[ColumnSpec(SAMPLE_ID_COLUMN)],
 )
 validation_request = SchemaDefinition(
     name="validation_request",
@@ -72,8 +63,6 @@ SCHEMAS: Dict[str, SchemaDefinition] = {
     schema.name: schema
     for schema in [
         candidate_pool,
-        train_pool,
-        validation_pool,
         validation_request,
         train_request,
         simulator_output,

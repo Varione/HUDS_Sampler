@@ -16,15 +16,13 @@ _logger = logging.getLogger(__name__)
 from huds_app.data.schema import (
     SAMPLE_ID_COLUMN,
     candidate_pool,
-    train_pool,
     validate_schema,
     validate_values,
-    validation_pool,
 )
 from huds_app.core.metrics import compute_metrics
 from huds_app.model.architecture import build_model
-from huds_app.data.pool import create_candidate_pool, save_pool_files, split_pool
-from huds_app.core.storage import RunState, ensure_run_dir, read_csv, write_csv, resolve_device
+from huds_app.data.pool import create_candidate_pool, save_pool_files
+from huds_app.core.storage import RunState, _normalize_sample_id, ensure_run_dir, read_csv, resolve_device
 from huds_app.model.train import apply_normalization, load_normalization
 
 
@@ -35,8 +33,7 @@ def init_run(config_path: str | Path, run_dir: str | Path, snap_to_levels: bool 
     shutil.copy2(config_path, run_path / "config.json")
 
     pool_df = create_candidate_pool(config, snap_to_levels=snap_to_levels)
-    train_df, valid_df = split_pool(pool_df, config, config.random_seed)
-    save_pool_files(pool_df, train_df, valid_df, run_path)
+    save_pool_files(pool_df, run_path)
 
     state = RunState(run_dir=str(run_path))
     state.save()
@@ -44,8 +41,6 @@ def init_run(config_path: str | Path, run_dir: str | Path, snap_to_levels: bool 
     return {
         "run_dir": str(run_path),
         "total_candidates": int(len(pool_df)),
-        "train_pool_size": int(len(train_df)),
-        "validation_pool_size": int(len(valid_df)),
     }
 
 
@@ -55,34 +50,40 @@ def show_status(run_dir: str | Path) -> dict[str, Any]:
     config = load_config(str(run_path / "config.json"))
 
     candidate_df = _read_optional_csv(run_path / "candidate_pool.csv")
-    train_pool_df = _read_optional_csv(run_path / "train_pool.csv")
-    validation_pool_df = _read_optional_csv(run_path / "validation_pool.csv")
-    train_labeled_df = _read_optional_csv(run_path / "datasets" / "train_labeled.csv")
-    validation_labeled_df = _read_optional_csv(run_path / "datasets" / "validation_labeled.csv")
+    datasets_dir = run_path / "datasets"
+    train_labeled_df = _read_optional_csv(datasets_dir / "train_labeled.csv")
+    val_labeled_df = _read_optional_csv(datasets_dir / "val_labeled.csv")
+    test_labeled_df = _read_optional_csv(datasets_dir / "test_labeled.csv")
 
-    labeled_train_ids = _sample_id_set(train_labeled_df)
-    remaining_unlabeled_total = _remaining_unlabeled_count(train_pool_df, labeled_train_ids, state)
-    pending_train_count = len(state.pending_sample_ids)
-    available_for_sampling = max(0, remaining_unlabeled_total - pending_train_count)
+    labeled_ids = set()
+    if train_labeled_df is not None:
+        labeled_ids.update(_sample_id_set(train_labeled_df))
+    if val_labeled_df is not None:
+        labeled_ids.update(_sample_id_set(val_labeled_df))
+    if test_labeled_df is not None:
+        labeled_ids.update(_sample_id_set(test_labeled_df))
+
+    remaining_unlabeled = _remaining_unlabeled_count(candidate_df, labeled_ids, state)
+    pending_count = len(state.pending_sample_ids)
+    available_for_sampling = max(0, remaining_unlabeled - pending_count)
     latest_checkpoint = state.latest_checkpoint or _existing_relative_path(run_path, run_path / "checkpoints" / "model_latest.pt")
 
     status = {
         "total_candidates": _row_count(candidate_df),
-        "train_pool_size": _row_count(train_pool_df),
-        "validation_pool_size": _row_count(validation_pool_df),
         "labeled_train_count": _row_count(train_labeled_df),
-        "labeled_val_count": _row_count(validation_labeled_df),
+        "labeled_val_count": _row_count(val_labeled_df),
+        "labeled_test_count": _row_count(test_labeled_df),
         "current_step": int(state.current_step),
         "trained_step": int(state.trained_step),
         "max_steps": int(config.training.max_steps),
         "latest_checkpoint": latest_checkpoint,
-        "remaining_unlabeled_total": remaining_unlabeled_total,
-        "pending_train_count": pending_train_count,
-        "available_for_sampling_count": available_for_sampling,
+        "remaining_unlabeled": remaining_unlabeled,
+        "pending_count": pending_count,
+        "available_for_sampling": available_for_sampling,
         "next_command": _next_command(
             state,
             train_labeled_df,
-            validation_labeled_df,
+            val_labeled_df,
             latest_checkpoint,
             config,
             available_for_sampling,
@@ -98,8 +99,6 @@ def validate_files(run_dir: str | Path) -> List[str]:
     errors: List[str] = []
     expected_files = [
         run_path / "candidate_pool.csv",
-        run_path / "train_pool.csv",
-        run_path / "validation_pool.csv",
         run_path / "state.json",
         run_path / "config.json",
     ]
@@ -116,8 +115,6 @@ def validate_files(run_dir: str | Path) -> List[str]:
 
     pool_specs = [
         (run_path / "candidate_pool.csv", candidate_pool, _request_columns(config)),
-        (run_path / "train_pool.csv", train_pool, _request_columns(config)),
-        (run_path / "validation_pool.csv", validation_pool, _request_columns(config)),
     ]
     valid_ids_by_file: dict[Path, set[Any]] = {}
     for path, schema, numeric_columns in pool_specs:
@@ -130,9 +127,11 @@ def validate_files(run_dir: str | Path) -> List[str]:
         errors.extend(_duplicate_id_errors(path, df))
 
     labeled_specs = [
-        (run_path / "datasets" / "train_labeled.csv", valid_ids_by_file.get(run_path / "train_pool.csv", set())),
-        (run_path / "datasets" / "validation_labeled.csv", valid_ids_by_file.get(run_path / "validation_pool.csv", set())),
+        (datasets_dir / "train_labeled.csv", valid_ids_by_file.get(run_path / "candidate_pool.csv", set())),
+        (datasets_dir / "val_labeled.csv", valid_ids_by_file.get(run_path / "candidate_pool.csv", set())),
+        (datasets_dir / "test_labeled.csv", valid_ids_by_file.get(run_path / "candidate_pool.csv", set())),
     ]
+    datasets_dir = run_path / "datasets"
     for path, valid_ids in labeled_specs:
         if not path.exists():
             continue
@@ -177,17 +176,17 @@ def predict(run_dir: str | Path, input_path: str | Path, output_path: str | Path
 def evaluate(run_dir: str | Path) -> dict[str, float]:
     run_path = Path(run_dir)
     config = load_config(str(run_path / "config.json"))
-    validation_df = read_csv(run_path / "datasets" / "validation_labeled.csv")
+    test_df = read_csv(run_path / "datasets" / "test_labeled.csv")
 
     variable_columns = _variable_columns(config)
     output_columns = list(config.model.output_names)
-    _require_columns(validation_df, [*variable_columns, *output_columns], run_path / "datasets" / "validation_labeled.csv")
+    _require_columns(test_df, [*variable_columns, *output_columns], run_path / "datasets" / "test_labeled.csv")
 
     model, device = _load_model_for_inference(run_path, config)
     normalization = load_normalization(run_path / "artifacts" / "normalization.json")
-    predictions = _predict_array(model, device, validation_df, variable_columns, normalization)
+    predictions = _predict_array(model, device, test_df, variable_columns, normalization)
     predictions = _denormalize_predictions(predictions, output_columns, normalization)
-    y_true = validation_df[output_columns].to_numpy(dtype=float)
+    y_true = test_df[output_columns].to_numpy(dtype=float)
 
     return compute_metrics(y_true, predictions, output_columns)
 
@@ -206,12 +205,11 @@ def _sample_id_set(df: pd.DataFrame | None) -> set[Any]:
     return set(df[SAMPLE_ID_COLUMN].dropna().tolist())
 
 
-def _remaining_unlabeled_count(train_pool_df: pd.DataFrame | None, labeled_ids: set[Any], state: RunState) -> int:
-    if train_pool_df is None or SAMPLE_ID_COLUMN not in train_pool_df.columns:
+def _remaining_unlabeled_count(candidate_df: pd.DataFrame | None, labeled_ids: set[Any], state: RunState) -> int:
+    if candidate_df is None or SAMPLE_ID_COLUMN not in candidate_df.columns:
         return 0
-    # FIX 17: Include pending_sample_ids in blocked set for consistency with huds.py _build_unlabeled_mask
     blocked_ids = set(state.used_sample_ids) | set(state.pending_sample_ids) | labeled_ids
-    return int((~train_pool_df[SAMPLE_ID_COLUMN].isin(list(blocked_ids))).sum())
+    return int((~candidate_df[SAMPLE_ID_COLUMN].isin(list(blocked_ids))).sum())
 
 
 def _existing_relative_path(run_path: Path, path: Path) -> str | None:
@@ -226,26 +224,13 @@ def _existing_relative_path(run_path: Path, path: Path) -> str | None:
 def _next_command(
     state: RunState,
     train_labeled_df: pd.DataFrame | None,
-    validation_labeled_df: pd.DataFrame | None,
+    val_labeled_df: pd.DataFrame | None,
     latest_checkpoint: str | None,
     config: Any,
     available_for_sampling: int,
 ) -> str:
-    """Determine the next recommended command based on workflow state.
-
-    FIX 05: Properly scan train_requests by step order to recommend correct command.
-    """
-    # Phase 1: validation preparation
-    if not state.validation_request_created:
-        return "export-validation"
-    if not state.validation_labeled or _row_count(validation_labeled_df) == 0:
-        return "import-labels --kind validation"
-
-    # Phase 2: initial training data export
-    if "0" not in state.train_requests:
-        return "export-initial-train"
-
-    # Phase 3: find first step with exported/partial status (needs label import)
+    """Determine the next recommended command based on workflow state."""
+    # Phase 1: find first step with exported/partial status (needs label import)
     pending_steps = []
     for step_str in sorted(state.train_requests.keys(), key=int):
         req = state.train_requests[step_str]
@@ -261,25 +246,25 @@ def _next_command(
 
     if pending_steps:
         first_pending = pending_steps[0]
-        return f"import-labels --kind train --step {first_pending}"
+        return f"import-labels --step {first_pending}"
 
-    # Phase 4: all requests labeled, check if training is needed
+    # Phase 2: all requests labeled, check if training is needed
     max_trained_step = int(getattr(state, "trained_step", -1))
     labeled_steps = [
         int(k) for k, v in state.train_requests.items()
         if v.get("status") == "labeled"
     ]
     if not labeled_steps:
-        return "train"
-    max_labeled_step = max(labeled_steps)
+        return "sample --step 1"
 
+    max_labeled_step = max(labeled_steps)
     if max_trained_step < max_labeled_step:
         return "train"
 
-    # Phase 5: training complete, check sampling eligibility
+    # Phase 3: training complete, check sampling eligibility
     if int(state.current_step) >= int(config.training.max_steps):
         return ""
-    if int(available_for_sampling) <= 0:
+    if available_for_sampling <= 0:
         return ""
 
     next_step = int(state.current_step) + 1
@@ -365,10 +350,6 @@ def _display_path(path: Path) -> str:
 
 
 def _load_model_for_inference(run_dir: str | Path, config: Any) -> tuple[Any, torch.device]:
-    """Load model for inference with strict fallback.
-
-    FIX 07: Try strict=True first, fall back to strict=False with diagnostic logging.
-    """
     run_path = Path(run_dir)
     checkpoint_path = run_path / "checkpoints" / "model_latest.pt"
 
@@ -415,7 +396,7 @@ def _predict_array(model: Any, device: torch.device, df: pd.DataFrame, var_cols:
     model.eval()
     with torch.no_grad():
         predictions = model(input_tensor)
-    
+
     return predictions.cpu().numpy()
 
 

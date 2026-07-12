@@ -6,12 +6,13 @@ from typing import Any, cast
 
 import numpy as np
 import pandas as pd
+import random
 import torch
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import euclidean_distances
 
 from huds_app.core.config import AppConfig, load_config
-from huds_app.data.schema import SAMPLE_ID_COLUMN, STATUS_COLUMN
+from huds_app.data.schema import SAMPLE_ID_COLUMN, STATUS_COLUMN, SPLIT_ASSIGNMENT_COLUMN
 from huds_app.model.architecture import build_model
 from huds_app.core.storage import RunState, _normalize_sample_id, ensure_run_dir, read_csv, write_csv, resolve_device
 
@@ -272,6 +273,9 @@ def select_huds(model, train_pool_df, unlabeled_mask, train_labeled_df, config, 
             print("Warning: no remaining candidates to fill; selected all available samples")
 
 
+    # Split selected samples into train/val/test sets per config.split
+    split_ids = _split_selected_ids(selected_ids, config)
+
     # FIX 6: Diagnostic fields accurately reflect the actual sampling process
     return {
         "selected_ids": selected_ids,
@@ -282,7 +286,49 @@ def select_huds(model, train_pool_df, unlabeled_mask, train_labeled_df, config, 
         "checkpoint_used": "",
         "selection_method": "topk_fallback" if used_fallback else "clustering",
         "fill_method": "k_center_from_high_uncertainty" if used_fill else None,
+        "split_assignment": split_ids,
     }
+
+
+def _split_selected_ids(selected_ids: list[str], config: AppConfig) -> dict[str, list[str]]:
+    """Split selected sample IDs into train/val/test sets per config.split.
+
+    Uses a deterministic shuffle based on config.random_seed for reproducibility.
+    """
+    n = len(selected_ids)
+    if n == 0:
+        return {"train": [], "val": [], "test": []}
+
+    indices = list(range(n))
+    random.Random(config.random_seed).shuffle(indices)
+
+    n_train = max(1, int(n * config.split.train_split))
+    n_val = max(0, int(n * config.split.val_split))
+    # Remaining go to test
+    n_test = n - n_train - n_val
+
+    split_indices = indices[:n_train]
+    val_indices = indices[n_train:n_train + n_val]
+    test_indices = indices[n_train + n_val:]
+
+    return {
+        "train": [selected_ids[i] for i in sorted(split_indices)],
+        "val": [selected_ids[i] for i in sorted(val_indices)],
+        "test": [selected_ids[i] for i in sorted(test_indices)],
+    }
+
+
+def _aggregate_labeled(run_path: Path) -> pd.DataFrame:
+    """Aggregate labeled samples from train/val/test splits."""
+    datasets_dir = run_path / "datasets"
+    frames = []
+    for filename in ("train_labeled.csv", "val_labeled.csv", "test_labeled.csv"):
+        path = datasets_dir / filename
+        if path.exists():
+            frames.append(read_csv(path))
+    if not frames:
+        return pd.DataFrame({SAMPLE_ID_COLUMN: []})
+    return pd.concat(frames, ignore_index=True)
 
 
 def run_huds_sampling(run_dir, config, step):
@@ -294,20 +340,19 @@ def run_huds_sampling(run_dir, config, step):
     variable_columns = [variable.name for variable in app_config.variables]
 
     # Defensive: verify required files exist before proceeding
-    train_pool_path = run_path / "train_pool.csv"
-    if not train_pool_path.exists():
+    candidate_pool_path = run_path / "candidate_pool.csv"
+    if not candidate_pool_path.exists():
         raise FileNotFoundError(
-            f"train_pool.csv missing from {run_path}. "
+            f"candidate_pool.csv missing from {run_path}. "
             "The benchmark may have been interrupted. Re-run the experiment."
         )
 
-    train_pool_df = read_csv(train_pool_path)
-    train_labeled_path = run_path / "datasets" / "train_labeled.csv"
-    train_labeled_df = read_csv(train_labeled_path) if train_labeled_path.exists() else pd.DataFrame({SAMPLE_ID_COLUMN: []})
+    candidate_pool_df = read_csv(candidate_pool_path)
+    all_labeled_df = _aggregate_labeled(run_path)
 
     checkpoint_path = _latest_checkpoint_path(run_path, state)
-    normalized_pool_df = _normalize_pool_for_model(train_pool_df, run_path, variable_columns)
-    unlabeled_mask = _build_unlabeled_mask(train_pool_df, train_labeled_df, state)
+    normalized_pool_df = _normalize_pool_for_model(candidate_pool_df, run_path, variable_columns)
+    unlabeled_mask = _build_unlabeled_mask(candidate_pool_df, all_labeled_df, state)
 
     device_obj = resolve_device(app_config.training.device)
     model = build_model(app_config).to(device_obj)
@@ -317,7 +362,7 @@ def run_huds_sampling(run_dir, config, step):
         model=model,
         train_pool_df=normalized_pool_df,
         unlabeled_mask=unlabeled_mask,
-        train_labeled_df=train_labeled_df,
+        train_labeled_df=all_labeled_df,
         config=app_config,
         var_cols=variable_columns,
         device=device_obj,
@@ -325,8 +370,14 @@ def run_huds_sampling(run_dir, config, step):
     result["checkpoint_used"] = str(checkpoint_path)
 
     selected_ids = result["selected_ids"]
-    request_df = train_pool_df[train_pool_df[SAMPLE_ID_COLUMN].isin(selected_ids)].copy()
+    split_assignment = result.pop("split_assignment")
+    request_df = candidate_pool_df[candidate_pool_df[SAMPLE_ID_COLUMN].isin(selected_ids)].copy()
     request_df = _order_request_rows(request_df, selected_ids)
+
+    # Add split assignment column to request CSV for import_labels routing
+    split_map = {sid: split_type for split_type, sids in split_assignment.items() for sid in sids}
+    request_df[SPLIT_ASSIGNMENT_COLUMN] = request_df[SAMPLE_ID_COLUMN].map(split_map)
+
     request_path = run_path / "requests" / f"train_step_{int(step):03d}_request.csv"
     diagnostics_path = run_path / "artifacts" / f"huds_step_{int(step):03d}.json"
 
@@ -337,7 +388,13 @@ def run_huds_sampling(run_dir, config, step):
 
     state.current_step = int(step)
     state.latest_checkpoint = str(checkpoint_path.relative_to(run_path)) if checkpoint_path.is_relative_to(run_path) else str(checkpoint_path)
-    
+
+    # Store split assignment in state
+    state.split_assignments[str(step)] = {
+        k: [_normalize_sample_id(sid) for sid in v]
+        for k, v in split_assignment.items()
+    }
+
     # FIX 03: Normalize sample IDs before extending pending_sample_ids
     state.pending_sample_ids.extend(_normalize_sample_id(sid) for sid in selected_ids)
     state.train_requests[str(step)] = {

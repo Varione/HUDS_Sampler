@@ -59,44 +59,21 @@ def _handle_init(args: argparse.Namespace) -> None:
     _print_result(result, f"Initialized run: {args.out}")
 
 
-def _handle_export_validation(args: argparse.Namespace) -> None:
-    validation = _load_module("validation")
-    config = _load_run_config(args.run)
-    output_path = validation.export_validation_request(
-        args.run,
-        config,
-        size=args.size,
-        incremental=args.incremental,
-    )
-    _print_result(output_path, "Exported validation request.")
-
-
-def _handle_export_initial_train(args: argparse.Namespace) -> None:
-    validation = _load_module("validation")
-    config = _load_run_config(args.run)
-    output_path = validation.export_initial_train_request(args.run, config)
-    _print_result(output_path, "Exported initial training request.")
-
-
 def _handle_import_labels(args: argparse.Namespace) -> None:
-    """Handle import-labels command with overwrite and allow_partial flags.
-    
-    FIX 7: Add CLI support for --overwrite and --allow-partial options.
-    """
+    """Handle import-labels command with overwrite and allow_partial flags."""
     validation = _load_module("validation")
     imported_count = validation.import_labels(
-        args.run, 
-        args.kind, 
-        args.step, 
+        args.run,
+        args.step,
         args.input,
-        overwrite=getattr(args, 'overwrite', False),  # FIX 7: Add overwrite flag support
-        allow_partial=getattr(args, 'allow_partial', False)  # FIX 7: Add allow-partial flag support
+        overwrite=getattr(args, 'overwrite', False),
+        allow_partial=getattr(args, 'allow_partial', False),
     )
-    
+
     if getattr(args, 'allow_partial', False):
-        print(f"Imported {imported_count} {args.kind} label row(s). Note: Partial import was allowed.")
+        print(f"Imported {imported_count} label row(s). Note: Partial import was allowed.")
     else:
-        print(f"Imported {imported_count} {args.kind} label row(s).")
+        print(f"Imported {imported_count} label row(s).")
 
 
 def _handle_train(args: argparse.Namespace) -> None:
@@ -179,26 +156,10 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--snap-to-levels", action="store_true", help="Snap generated samples to variable levels.")
     init_parser.set_defaults(handler=_handle_init)
 
-    export_validation_parser = subparsers.add_parser("export-validation", help="Export validation samples for simulation.")
-    _add_run_argument(export_validation_parser)
-    export_validation_parser.add_argument("--size", type=int, help="Number of validation samples to export.")
-    export_validation_parser.add_argument(
-        "--incremental",
-        action="store_true",
-        help="Append a new validation request excluding previously requested/labeled validation samples.",
-    )
-    export_validation_parser.set_defaults(handler=_handle_export_validation)
-
-    export_initial_train_parser = subparsers.add_parser("export-initial-train", help="Export initial training samples.")
-    _add_run_argument(export_initial_train_parser)
-    export_initial_train_parser.set_defaults(handler=_handle_export_initial_train)
-
     import_labels_parser = subparsers.add_parser("import-labels", help="Import simulator labels into the run datasets.")
     _add_run_argument(import_labels_parser)
-    import_labels_parser.add_argument("--kind", required=True, choices=("validation", "train"), help="Label destination kind.")
-    import_labels_parser.add_argument("--step", type=int, help="Training request step, required for --kind train.")
+    import_labels_parser.add_argument("--step", type=int, required=True, help="Training step number.")
     import_labels_parser.add_argument("--input", required=True, help="Simulator output CSV path.")
-    # FIX 7: Add CLI flags for overwrite and allow-partial options
     import_labels_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing labeled data.")
     import_labels_parser.add_argument("--allow-partial", action="store_true", help="Allow partial label imports when not all request IDs are covered.")
     import_labels_parser.set_defaults(handler=_handle_import_labels)
