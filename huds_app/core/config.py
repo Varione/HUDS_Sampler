@@ -344,11 +344,9 @@ def load_config(path: str) -> AppConfig:
         huds=_from_dict(HUDSConfig, raw.get("huds", {})),
     )
 
-    # FIX 14: Use Pydantic validation when available for stricter checks
+    validate_config(config)
     if PYDANTIC_AVAILABLE:
         _validate_with_pydantic(config)
-    else:
-        validate_config(config)
 
     return config
 

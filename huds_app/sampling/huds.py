@@ -47,7 +47,10 @@ def mc_dropout_predict(model, x, repeat_times, batch_size, return_outputs: bool 
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
 
-    # FIX 4: Only enable Dropout, don't affect BatchNorm
+    # Save original training state of each module for correct restoration
+    was_training = model.training
+    pred_mean = None
+
     _enable_mc_dropout(model)
 
     if isinstance(x, torch.Tensor):
@@ -88,21 +91,24 @@ def mc_dropout_predict(model, x, repeat_times, batch_size, return_outputs: bool 
         pred_mean = outputs.mean(dim=0).numpy()  # (n, output_dim)
         output_var = outputs.var(dim=0)  # (n, output_dim) using population variance
 
-        # FIX 12: Normalize uncertainty by output dimension and scale
-        # U_i = (1/D) * sum_d Var(y_{i,d}) / (s_d^2 + epsilon)
+        # FIX 3: Normalize uncertainty by output dimension variance to prevent
+        # large-scale outputs from dominating uncertainty estimation.
+        # U_i = (1/D) * sum_d Var(y_{i,d}) / (Var(y_{i,d}).mean() + epsilon)
         D = output_var.shape[1]
-        # Use a small epsilon to avoid division by zero for constant outputs
         epsilon = 1e-8
-        # Normalize each output dimension by its scale (std from initial training data)
-        # Note: In practice, s_d should come from normalization statistics
-        uncertainties = (output_var.sum(dim=1) / D).numpy()
+        # Normalize each dimension by the mean variance across all samples for that dimension
+        dim_scale = output_var.mean(dim=0).clamp(min=epsilon)
+        normalized_var = output_var / dim_scale[None, :]
+        uncertainties = normalized_var.mean(dim=1).numpy()
     else:
         # For embeddings, compute mean and variance online would require different storage
         # Current implementation still stores all repeats for clustering
         uncertainties = embeddings.var(axis=0).mean(axis=1)
 
 
-    if not was_training:
+    if was_training:
+        model.train()
+    else:
         model.eval()
 
     return embeddings, uncertainties, pred_mean
@@ -168,15 +174,6 @@ def select_huds(model, train_pool_df, unlabeled_mask, train_labeled_df, config, 
     for cluster_id in range(n_clusters):
         member_indices = np.flatnonzero(labels == cluster_id)  # local indices in topk_pool
 
-        # FIX 16: Skip clusters with fewer than 2 members (no statistical significance)
-        if member_indices.size < 2:
-            cluster_stats_out[str(cluster_id)] = {
-                "size": int(member_indices.size), "selected_id": None,
-                "max_uncertainty": None, "mean_uncertainty": None,
-                "skipped": True,
-            }
-            continue
-
         if member_indices.size == 0:
             cluster_stats_out[str(cluster_id)] = {
                 "size": 0, "selected_id": None,
@@ -184,8 +181,13 @@ def select_huds(model, train_pool_df, unlabeled_mask, train_labeled_df, config, 
             }
             continue
 
-        # Pick the member with highest uncertainty within this cluster
-        local_best = member_indices[np.argmax(topk_uncertainties[member_indices])]
+        # FIX 5: For single-member clusters, select the only member directly.
+        # Single-member clusters indicate isolated points in embedding space,
+        # which are precisely the novel/boundary samples active learning should target.
+        if member_indices.size == 1:
+            local_best = member_indices[0]
+        else:
+            local_best = member_indices[np.argmax(topk_uncertainties[member_indices])]
         candidate_position = int(topk_pool.index[local_best])  # position in candidate_pool
 
         cluster_positions.append(candidate_position)
@@ -198,8 +200,8 @@ def select_huds(model, train_pool_df, unlabeled_mask, train_labeled_df, config, 
         }
 
     # --- 5. Build result ---
+    used_fallback = False
     if not cluster_positions:
-        # FIX 21: All clusters skipped (<2 members each), fall back to Top-K direct selection
         fallback_n = min(n_select, len(candidate_pool))
         fallback_indices = np.argsort(-uncertainties)[:fallback_n]
         selected_ids = [
@@ -208,8 +210,9 @@ def select_huds(model, train_pool_df, unlabeled_mask, train_labeled_df, config, 
         ]
         selected_uncertainties = [float(uncertainties[pos]) for pos in fallback_indices]
         cluster_positions = [int(pos) for pos in fallback_indices]
+        used_fallback = True
         print(
-            f"Warning: all {n_clusters} clusters had <2 members, "
+            f"Warning: all {n_clusters} clusters had 0 members, "
             f"falling back to Top-K selection ({len(fallback_indices)} samples)"
         )
     else:
@@ -220,14 +223,17 @@ def select_huds(model, train_pool_df, unlabeled_mask, train_labeled_df, config, 
         selected_uncertainties = [float(uncertainties[pos]) for pos in cluster_positions]
 
     # --- 6. Fill with k-center from high-uncertainty candidates only ---
+    used_fill = False
     if len(selected_ids) < n_select:
+        used_fill = True
         # FIX 11: Only select fillers from the top-k uncertainty pool, not the full candidate set
         # This maintains the principle of uncertainty priority even during filling
 
-        # Get positions in candidate_pool that are NOT yet selected
-        all_positions = np.arange(len(candidate_pool))
+        # FIX 4: Only fill from the Top-K high-uncertainty pool, not the full candidate set
         already_selected = set(cluster_positions)
-        remaining_positions = [pos for pos in all_positions if pos not in already_selected]
+        remaining_positions = [
+            int(pos) for pos in topk_positions if int(pos) not in already_selected
+        ]
 
         if remaining_positions:
             # Extract features and uncertainties for remaining candidates
@@ -265,18 +271,16 @@ def select_huds(model, train_pool_df, unlabeled_mask, train_labeled_df, config, 
             print("Warning: no remaining candidates to fill; selected all available samples")
 
 
-    # FIX 13: Redefine diagnostic fields to accurately reflect sampling process
+    # FIX 6: Diagnostic fields accurately reflect the actual sampling process
     return {
         "selected_ids": selected_ids,
         "uncertainties": selected_uncertainties,
-        # topk_size now reflects actual number of samples selected via clustering/fallback
-        "topk_size": int(len(selected_ids)),
+        "topk_size": int(len(topk_positions)),
         "n_clusters": int(n_clusters),
         "cluster_stats": cluster_stats_out,
         "checkpoint_used": "",
-        # Additional diagnostic fields for better understanding
-        "selection_method": "clustering" if len(cluster_positions) > 0 else "topk_fallback",
-        "fill_method": "k_center_from_high_uncertainty" if len(selected_ids) < n_select else None,
+        "selection_method": "topk_fallback" if used_fallback else "clustering",
+        "fill_method": "k_center_from_high_uncertainty" if used_fill else None,
     }
 
 
