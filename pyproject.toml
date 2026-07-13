@@ -13,6 +13,7 @@ dependencies = [
   "pandas",
   "torch",
   "scikit-learn",
+  "pywin32",
 ]
 
 [project.optional-dependencies]
