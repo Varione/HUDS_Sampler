@@ -48,23 +48,36 @@ class ConfigPage(QWizardPage):
         var_group.setLayout(var_layout)
         layout.addWidget(var_group)
 
-        output_group = QGroupBox("输出设置")
+        output_group = QGroupBox("输出变量设置")
         output_layout = QVBoxLayout()
 
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("仿真输出变量:"))
-        self.output_names_edit = QLineEdit("peak_force_y,peak_force_z")
-        row1.addWidget(self.output_names_edit, 1)
-        output_layout.addLayout(row1)
+        auto_out_row = QHBoxLayout()
+        auto_out_row.addWidget(QLabel("已检测到的输出变量:"))
+        self.auto_detect_outputs_btn = QPushButton("自动填充")
+        self.auto_detect_outputs_btn.clicked.connect(self._auto_fill_outputs)
+        auto_out_row.addWidget(self.auto_detect_outputs_btn)
+        output_layout.addLayout(auto_out_row)
+
+        self.output_table = QTableWidget(0, 3)
+        self.output_table.setHorizontalHeaderLabels(["选择", "名称", "类型"])
+        self.output_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.output_table.setColumnHidden(2, False)
+        output_layout.addWidget(self.output_table)
 
         row2 = QHBoxLayout()
-        row2.addWidget(QLabel("稳态提取比例:"))
+        row2.addWidget(QLabel("手动添加 (逗号分隔):"))
+        self.output_names_edit = QLineEdit("")
+        row2.addWidget(self.output_names_edit, 1)
+        output_layout.addLayout(row2)
+
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("稳态提取比例:"))
         self.steady_pct_spin = QDoubleSpinBox()
         self.steady_pct_spin.setRange(0.01, 1.0)
         self.steady_pct_spin.setSingleStep(0.05)
         self.steady_pct_spin.setValue(0.2)
-        row2.addWidget(self.steady_pct_spin)
-        output_layout.addLayout(row2)
+        row3.addWidget(self.steady_pct_spin)
+        output_layout.addLayout(row3)
 
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
@@ -123,6 +136,30 @@ class ConfigPage(QWizardPage):
         layout.addWidget(train_group)
         layout.addStretch()
 
+    def _auto_fill_outputs(self):
+        detected = self.window().property("detected_outputs") or []
+        if not detected:
+            return
+        
+        self.output_table.setRowCount(len(detected))
+        for i, output in enumerate(detected):
+            cb = QCheckBox()
+            cb.setChecked(True)
+            cb_widget = QWidget()
+            cb_layout = QHBoxLayout(cb_widget)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(cb, Qt.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            self.output_table.setCellWidget(i, 0, cb_widget)
+
+            name_item = QTableWidgetItem(output.get("name", ""))
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+            self.output_table.setItem(i, 1, name_item)
+
+            type_item = QTableWidgetItem(output.get("type", ""))
+            type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
+            self.output_table.setItem(i, 2, type_item)
+
     def _auto_fill_variables(self):
         detected = self.window().property("detected_variables") or []
         if not detected:
@@ -158,9 +195,13 @@ class ConfigPage(QWizardPage):
             self.var_table.setItem(i, 5, unit_item)
     
     def initializePage(self):
-        detected = self.window().property("detected_variables") or []
-        if detected:
+        detected_vars = self.window().property("detected_variables") or []
+        if detected_vars:
             self._auto_fill_variables()
+        
+        detected_outputs = self.window().property("detected_outputs") or []
+        if detected_outputs:
+            self._auto_fill_outputs()
     
     def validatePage(self):
         from huds_app.utils.aedt_parser import parse_value_with_unit
@@ -193,7 +234,21 @@ class ConfigPage(QWizardPage):
             QMessageBox.warning(self, "警告", "请至少选择一个变量并填写最小值和最大值")
             return False
 
-        output_names = [x.strip() for x in self.output_names_edit.text().split(",") if x.strip()]
+        # Collect output names from table and manual input
+        output_names = []
+        for i in range(self.output_table.rowCount()):
+            cb_widget = self.output_table.cellWidget(i, 0)
+            cb = cb_widget.findChild(QCheckBox) if cb_widget else None
+            if cb and cb.isChecked():
+                name_item = self.output_table.item(i, 1)
+                if name_item:
+                    output_names.append(name_item.text())
+        
+        # Add manually specified outputs
+        manual_outputs = [x.strip() for x in self.output_names_edit.text().split(",") if x.strip()]
+        for o in manual_outputs:
+            if o not in output_names:
+                output_names.append(o)
 
         config = {
             "project_name": time.strftime("%Y%m%d_%H%M%S"),

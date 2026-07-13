@@ -40,9 +40,13 @@ class HUDSTabWindow(QMainWindow):
             self._sync_to_result()
 
     def _sync_variables_to_config(self):
-        detected = self.aedt_panel.get_detected_variables()
-        if detected:
-            self.config_panel.set_detected_variables(detected)
+        detected_vars = self.aedt_panel.get_detected_variables()
+        if detected_vars:
+            self.config_panel.set_detected_variables(detected_vars)
+        
+        detected_outputs = self.aedt_panel.get_detected_outputs()
+        if detected_outputs:
+            self.config_panel.set_detected_outputs(detected_outputs)
 
     def _sync_to_monitor(self):
         config = self.config_panel.get_config()

@@ -199,22 +199,31 @@ class AEDTPage(QWidget):
             self._design_name = self.design_list.item(row).text()
 
         detected_vars = []
+        detected_outputs = []
         if self._oProject:
             try:
                 oDesign = self._oProject.SetActiveDesign(self._design_name)
                 aedt_path = self._oProject.GetPath()
-                from huds_app.utils.aedt_parser import parse_aedt_variables
+                from huds_app.utils.aedt_parser import parse_aedt_variables, parse_aedt_outputs
                 detected_vars = parse_aedt_variables(aedt_path, self._design_name)
+                detected_outputs = parse_aedt_outputs(aedt_path, self._design_name)
             except Exception as e:
-                print(f"[AEDT] Variable detection failed: {e}")
+                print(f"[AEDT] Detection failed: {e}")
 
         self._detected_vars = detected_vars
+        self._detected_outputs = detected_outputs
         print(f"[AEDT] Detected {len(detected_vars)} variables:")
         for v in detected_vars:
-            print(f"  {v['name']}: default={v.get('default', 'N/A')}, min={v.get('min', 'N/A')}, max={v.get('max', 'N/A')}")
+            print(f"  {v['name']}: default={v.get('default', 'N/A')}")
+        print(f"[AEDT] Detected {len(detected_outputs)} outputs:")
+        for o in detected_outputs:
+            print(f"  {o['name']} ({o.get('type', 'N/A')})")
 
     def get_detected_variables(self):
         return getattr(self, '_detected_vars', [])
+
+    def get_detected_outputs(self):
+        return getattr(self, '_detected_outputs', [])
 
     def get_aedt_info(self):
         return self._aedt_path, self._design_name

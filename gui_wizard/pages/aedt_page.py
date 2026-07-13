@@ -227,13 +227,18 @@ class AEDTPage(QWizardPage):
                 pass
         
         if aedt_path:
-            from huds_app.utils.aedt_parser import parse_aedt_variables
+            from huds_app.utils.aedt_parser import parse_aedt_variables, parse_aedt_outputs
             vars = parse_aedt_variables(aedt_path, design_name)
+            outputs = parse_aedt_outputs(aedt_path, design_name)
             wizard = self.window()
             wizard.setProperty("detected_variables", vars)
+            wizard.setProperty("detected_outputs", outputs)
             print(f"[AEDT] Detected {len(vars)} variables for design '{design_name}':")
             for v in vars:
                 print(f"  {v['name']}: default={v.get('default', 'N/A')}, unit={v.get('unit', 'N/A')}")
+            print(f"[AEDT] Detected {len(outputs)} outputs:")
+            for o in outputs:
+                print(f"  {o['name']} ({o.get('type', 'N/A')})")
 
     def initializePage(self):
         config = self.window().property("config")

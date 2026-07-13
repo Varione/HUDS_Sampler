@@ -73,9 +73,14 @@ class HUDSModernWindow(QMainWindow):
     def _on_nav_changed(self, row):
         self.stack.setCurrentIndex(row)
         if row == 1:
-            detected = self.aedt_page.get_detected_variables()
-            if detected:
-                self.config_page.set_detected_variables(detected)
+            detected_vars = self.aedt_page.get_detected_variables()
+            if detected_vars:
+                self.config_page.set_detected_variables(detected_vars)
+            
+            detected_outputs = self.aedt_page.get_detected_outputs()
+            if detected_outputs:
+                self.config_page._auto_fill_outputs()
+                self.setProperty("detected_outputs", detected_outputs)
 
 
 class SidebarTitle(QWidget):

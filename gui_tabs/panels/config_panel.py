@@ -58,9 +58,16 @@ class ConfigPanel(QFrame):
         self.var_table.setColumnHidden(5, True)
         add_widget(self.var_table, col=1, stretch=2)
 
-        # Output names
-        add_label("Output Names (comma separated)")
-        self.output_names_edit = QLineEdit("peak_force_y,peak_force_z")
+        # Output variables table
+        add_label("Output Variables:", col=0)
+        self.output_table = QTableWidget(0, 3)
+        self.output_table.setHorizontalHeaderLabels(["Select", "Name", "Type"])
+        self.output_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        add_widget(self.output_table, col=1, stretch=2)
+
+        # Manual output names
+        add_label("Manual Output Names (comma separated)")
+        self.output_names_edit = QLineEdit("")
         add_widget(self.output_names_edit, stretch=2)
 
         # Steady state pct
@@ -148,6 +155,26 @@ class ConfigPanel(QFrame):
             unit_item.setFlags(unit_item.flags() & ~Qt.ItemIsEditable)
             self.var_table.setItem(i, 5, unit_item)
 
+    def set_detected_outputs(self, detected_outs):
+        self.output_table.setRowCount(len(detected_outs))
+        for i, output in enumerate(detected_outs):
+            cb = QCheckBox()
+            cb.setChecked(True)
+            cb_widget = QWidget()
+            cb_layout = QHBoxLayout(cb_widget)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(cb, Qt.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            self.output_table.setCellWidget(i, 0, cb_widget)
+
+            name_item = QTableWidgetItem(output.get("name", ""))
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+            self.output_table.setItem(i, 1, name_item)
+
+            type_item = QTableWidgetItem(output.get("type", ""))
+            type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
+            self.output_table.setItem(i, 2, type_item)
+
     def get_config(self):
         from huds_app.utils.aedt_parser import parse_value_with_unit
         
@@ -177,7 +204,19 @@ class ConfigPanel(QFrame):
                     "unit": var_unit,
                 })
 
-        output_names = [x.strip() for x in self.output_names_edit.text().split(",") if x.strip()]
+        output_names = []
+        for i in range(self.output_table.rowCount()):
+            cb_widget = self.output_table.cellWidget(i, 0)
+            cb = cb_widget.findChild(QCheckBox) if cb_widget else None
+            if cb and cb.isChecked():
+                name_item = self.output_table.item(i, 1)
+                if name_item:
+                    output_names.append(name_item.text())
+        
+        manual_outputs = [x.strip() for x in self.output_names_edit.text().split(",") if x.strip()]
+        for o in manual_outputs:
+            if o not in output_names:
+                output_names.append(o)
 
         return {
             "project_name": time.strftime("%Y%m%d_%H%M%S"),

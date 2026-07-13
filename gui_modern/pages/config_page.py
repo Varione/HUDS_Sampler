@@ -64,16 +64,35 @@ class ConfigPage(QWidget):
         layout.addWidget(var_group)
 
         output_group = QGroupBox("Output Variables")
-        output_layout = QFormLayout()
-        self.output_names = QLineEdit()
-        self.output_names.setText("peak_force_y,peak_force_z")
+        output_layout = QVBoxLayout()
+
+        auto_out_row = QHBoxLayout()
+        auto_out_row.addWidget(QLabel("Detected outputs:"))
+        self.auto_detect_outputs_btn = QPushButton("Auto Fill")
+        self.auto_detect_outputs_btn.clicked.connect(self._auto_fill_outputs)
+        auto_out_row.addWidget(self.auto_detect_outputs_btn)
+        output_layout.addLayout(auto_out_row)
+
+        self.output_table = QTableWidget(0, 3)
+        self.output_table.setHorizontalHeaderLabels(["Select", "Name", "Type"])
+        self.output_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        output_layout.addWidget(self.output_table)
+
+        manual_row = QHBoxLayout()
+        manual_row.addWidget(QLabel("Manual (comma separated):"))
+        self.output_names = QLineEdit("")
         self.output_names.setPlaceholderText("Comma-separated output names")
-        output_layout.addRow("Output Names:", self.output_names)
+        manual_row.addWidget(self.output_names, 1)
+        output_layout.addLayout(manual_row)
+
+        steady_row = QHBoxLayout()
+        steady_row.addWidget(QLabel("Steady State Pct:"))
         self.steady_pct = QDoubleSpinBox()
         self.steady_pct.setValue(0.2)
         self.steady_pct.setRange(0.01, 1.0)
         self.steady_pct.setSingleStep(0.05)
-        output_layout.addRow("Steady State Pct:", self.steady_pct)
+        steady_row.addWidget(self.steady_pct)
+        output_layout.addLayout(steady_row)
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
 
@@ -189,15 +208,49 @@ class ConfigPage(QWidget):
             unit_item.setFlags(unit_item.flags() & ~Qt.ItemIsEditable)
             self.var_table.setItem(i, 5, unit_item)
 
+    def _auto_fill_outputs(self):
+        detected = self.window().property("detected_outputs") or []
+        if not detected:
+            return
+        
+        self.output_table.setRowCount(len(detected))
+        for i, output in enumerate(detected):
+            cb = QCheckBox()
+            cb.setChecked(True)
+            cb_widget = QWidget()
+            cb_layout = QHBoxLayout(cb_widget)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(cb, Qt.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            self.output_table.setCellWidget(i, 0, cb_widget)
+
+            name_item = QTableWidgetItem(output.get("name", ""))
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+            self.output_table.setItem(i, 1, name_item)
+
+            type_item = QTableWidgetItem(output.get("type", ""))
+            type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
+            self.output_table.setItem(i, 2, type_item)
+
     def get_config(self):
         import time
         project_name = self.project_name.text().strip()
         if not project_name:
             project_name = time.strftime("%Y%m%d_%H%M%S")
 
-        output_names = [
-            x.strip() for x in self.output_names.text().split(",") if x.strip()
-        ]
+        output_names = []
+        for i in range(self.output_table.rowCount()):
+            cb_widget = self.output_table.cellWidget(i, 0)
+            cb = cb_widget.findChild(QCheckBox) if cb_widget else None
+            if cb and cb.isChecked():
+                name_item = self.output_table.item(i, 1)
+                if name_item:
+                    output_names.append(name_item.text())
+        
+        manual_outputs = [x.strip() for x in self.output_names.text().split(",") if x.strip()]
+        for o in manual_outputs:
+            if o not in output_names:
+                output_names.append(o)
 
         selected_vars = []
         for i in range(self.var_table.rowCount()):

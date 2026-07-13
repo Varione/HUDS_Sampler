@@ -134,6 +134,115 @@ def parse_aedt_variables(aedt_path, design_name):
     return unique_vars
 
 
+def parse_aedt_outputs(aedt_path, design_name):
+    """Parse .aedt file to extract output variable names (Maxwell parameters).
+    
+    Args:
+        aedt_path: Path to the .aedt file or directory containing it
+        design_name: Name of the design
+        
+    Returns:
+        List of dicts with keys: name, type (e.g., 'Force', 'Torque')
+    """
+    import os
+    
+    if os.path.isdir(aedt_path):
+        aedt_files = [f for f in os.listdir(aedt_path) if f.endswith('.aedt')]
+        if not aedt_files:
+            return []
+        aedt_file = os.path.join(aedt_path, aedt_files[0])
+    else:
+        aedt_file = aedt_path
+    
+    if not os.path.exists(aedt_file):
+        return []
+    
+    try:
+        with open(aedt_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except Exception:
+        return []
+    
+    current_design = None
+    in_maxwell_params = False
+    in_sim_data_extractor = False
+    current_param_name = None
+    outputs = []
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Track Maxwell3DModel blocks
+        if "$begin 'Maxwell3DModel'" in stripped:
+            current_design = None
+            continue
+            
+        if "$end 'Maxwell3DModel'" in stripped:
+            current_design = None
+            continue
+        
+        # Detect design name
+        if current_design is None and stripped.startswith("Name='"):
+            match = re.match(r"Name='([^']+)'", stripped)
+            if match and match.group(1) == design_name:
+                current_design = design_name
+        
+        if not current_design:
+            continue
+        
+        # Track MaxwellParameterSetup section
+        if "$begin 'MaxwellParameters'" in stripped:
+            in_maxwell_params = True
+            continue
+            
+        if "$end 'MaxwellParameters'" in stripped and in_maxwell_params:
+            in_maxwell_params = False
+            continue
+        
+        # Track SimDataExtractor section
+        if "$begin 'SimDataExtractor'" in stripped:
+            in_sim_data_extractor = True
+            continue
+            
+        if "$end 'SimDataExtractor'" in stripped:
+            in_sim_data_extractor = False
+            continue
+        
+        # Parse Maxwell parameter definitions
+        if in_maxwell_params:
+            param_match = re.match(r"\$begin '(\w+)'", stripped)
+            if param_match:
+                current_param_name = param_match.group(1)
+                continue
+            
+            type_match = re.search(r"MaxwellParameterType='([^']+)'", stripped)
+            if type_match and current_param_name:
+                outputs.append({
+                    'name': current_param_name,
+                    'type': type_match.group(1),
+                })
+        
+        # Parse SimValue entries for actual output quantities
+        if in_sim_data_extractor:
+            sim_match = re.search(r"SimValue\('([^']+)'", stripped)
+            if sim_match:
+                full_name = sim_match.group(1)
+                outputs.append({
+                    'name': full_name,
+                    'type': 'Result',
+                })
+    
+    # Deduplicate by name
+    seen = set()
+    unique_outputs = []
+    for o in outputs:
+        if o['name'] not in seen:
+            seen.add(o['name'])
+            unique_outputs.append(o)
+    
+    return unique_outputs
+
+
 def parse_value_with_unit(value_str):
     """Parse a value string like '180mm' into numeric value and unit.
     
