@@ -8,13 +8,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QSpinBox,
     QComboBox,
-    QPushButton,
     QGroupBox,
-    QTableWidget,
-    QTableWidgetItem,
-    QHeaderView,
-    QCheckBox,
-    QWidget,
 )
 
 
@@ -29,23 +23,32 @@ class ConfigPage(QWizardPage):
         layout = QVBoxLayout()
         self.setLayout(layout)
 
-        var_group = QGroupBox("扫参变量 (从设计中选择)")
+        var_group = QGroupBox("扫参变量")
         var_layout = QVBoxLayout()
 
-        self.var_table = QTableWidget(0, 5)
-        self.var_table.setHorizontalHeaderLabels(["选择", "变量名", "默认值", "单位", "说明"])
-        self.var_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.var_table.setColumnHidden(4, True)
-        var_layout.addWidget(self.var_table)
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("变量名:"))
+        self.var_names_edit = QLineEdit("v")
+        row1.addWidget(self.var_names_edit, 1)
+        var_layout.addLayout(row1)
 
-        refresh_btn = QPushButton("刷新变量列表")
-        refresh_btn.clicked.connect(self._refresh_variables)
-        var_layout.addWidget(refresh_btn)
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("最小值:"))
+        self.var_mins_edit = QLineEdit("100")
+        row2.addWidget(self.var_mins_edit, 1)
+        var_layout.addLayout(row2)
 
-        layout.addWidget(QLabel("提示: 如果自动检测失败，请手动输入变量名（逗号分隔）"))
-        self.manual_var_edit = QLineEdit()
-        self.manual_var_edit.setPlaceholderText("例如: v1, v2, v3")
-        var_layout.addWidget(self.manual_var_edit)
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("最大值:"))
+        self.var_maxs_edit = QLineEdit("500")
+        row3.addWidget(self.var_maxs_edit, 1)
+        var_layout.addLayout(row3)
+
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel("单位:"))
+        self.var_units_edit = QLineEdit("km_per_hour")
+        row4.addWidget(self.var_units_edit, 1)
+        var_layout.addLayout(row4)
 
         var_group.setLayout(var_layout)
         layout.addWidget(var_group)
@@ -125,70 +128,25 @@ class ConfigPage(QWizardPage):
         layout.addWidget(train_group)
         layout.addStretch()
 
-    def _refresh_variables(self):
-        wizard = self.window()
-        detected = wizard.property("detected_variables") or []
-        self._populate_var_table(detected)
-
-    def _populate_var_table(self, detected_vars):
-        self.var_table.setRowCount(len(detected_vars))
-        for i, var in enumerate(detected_vars):
-            cb = QCheckBox()
-            cb.setChecked(True)
-            cb_widget = QWidget()
-            cb_layout = QHBoxLayout(cb_widget)
-            cb_layout.addWidget(cb)
-            cb_layout.setAlignment(cb, 0x02 | 0x40)
-            cb_layout.setContentsMargins(0, 0, 0, 0)
-            self.var_table.setCellWidget(i, 0, cb_widget)
-
-            name_item = QTableWidgetItem(var.get("name", ""))
-            name_item.setFlags(name_item.flags() & ~2)
-            self.var_table.setItem(i, 1, name_item)
-
-            val_item = QTableWidgetItem(var.get("value", ""))
-            val_item.setFlags(val_item.flags() & ~2)
-            self.var_table.setItem(i, 2, val_item)
-
-            unit_item = QTableWidgetItem(var.get("unit", ""))
-            unit_item.setFlags(unit_item.flags() & ~2)
-            self.var_table.setItem(i, 3, unit_item)
-
-    def initializePage(self):
-        wizard = self.window()
-        detected = wizard.property("detected_variables") or []
-        self._populate_var_table(detected)
-
     def validatePage(self):
-        selected_vars = []
-        for i in range(self.var_table.rowCount()):
-            cb_widget = self.var_table.cellWidget(i)
-            cb = cb_widget.findChild(QCheckBox) if cb_widget else None
-            if cb and cb.isChecked():
-                name_item = self.var_table.item(i, 1)
-                unit_item = self.var_table.item(i, 3)
-                var_name = name_item.text() if name_item else ""
-                var_unit = unit_item.text() if unit_item else ""
-                selected_vars.append({
-                    "name": var_name,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "sample_points": 60,
-                    "unit": var_unit,
-                })
+        var_names = [x.strip() for x in self.var_names_edit.text().split(",") if x.strip()]
+        var_mins = [float(x.strip()) for x in self.var_mins_edit.text().split(",") if x.strip()]
+        var_maxs = [float(x.strip()) for x in self.var_maxs_edit.text().split(",") if x.strip()]
+        var_units_raw = self.var_units_edit.text()
+        var_units = [x.strip() for x in var_units_raw.split(",") if x.strip()]
 
-        # If no variables selected from table, try manual input
-        if not selected_vars:
-            manual_text = self.manual_var_edit.text().strip()
-            if manual_text:
-                for vname in [x.strip() for x in manual_text.split(",") if x.strip()]:
-                    selected_vars.append({
-                        "name": vname,
-                        "min": 0.0,
-                        "max": 1.0,
-                        "sample_points": 60,
-                        "unit": "",
-                    })
+        while len(var_units) < len(var_names):
+            var_units.append("")
+
+        variables = []
+        for i, name in enumerate(var_names):
+            variables.append({
+                "name": name,
+                "min": var_mins[i] if i < len(var_mins) else 0.0,
+                "max": var_maxs[i] if i < len(var_maxs) else 1.0,
+                "sample_points": 60,
+                "unit": var_units[i] if i < len(var_units) else "",
+            })
 
         output_names = [x.strip() for x in self.output_names_edit.text().split(",") if x.strip()]
 
@@ -196,7 +154,7 @@ class ConfigPage(QWizardPage):
             "project_name": time.strftime("%Y%m%d_%H%M%S"),
             "random_seed": 42,
             "aedt_project_path": self.window().property("aedt_path") or "",
-            "variables": selected_vars,
+            "variables": variables,
             "candidate_pool": {"total_samples": self.total_samples_spin.value()},
             "split": {"train_split": 0.8, "val_split": 0.1, "test_split": 0.1},
             "model": {
