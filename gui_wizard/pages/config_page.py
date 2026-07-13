@@ -43,7 +43,6 @@ class ConfigPage(QWizardPage):
         self.var_table = QTableWidget(0, 6)
         self.var_table.setHorizontalHeaderLabels(["选择", "名称", "默认值", "最小值", "最大值", "单位"])
         self.var_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.var_table.setColumnHidden(5, True)
         var_layout.addWidget(self.var_table)
 
         var_group.setLayout(var_layout)
@@ -129,11 +128,8 @@ class ConfigPage(QWizardPage):
         if not detected:
             return
         
-        from huds_app.utils.aedt_parser import parse_value_with_unit
-        
-        filtered = [v for v in detected if v.get('min') and v.get('max')]
-        self.var_table.setRowCount(len(filtered))
-        for i, var in enumerate(filtered):
+        self.var_table.setRowCount(len(detected))
+        for i, var in enumerate(detected):
             cb = QCheckBox()
             cb.setChecked(True)
             cb_widget = QWidget()
@@ -151,14 +147,13 @@ class ConfigPage(QWizardPage):
             default_item.setFlags(default_item.flags() & ~Qt.ItemIsEditable)
             self.var_table.setItem(i, 2, default_item)
 
-            min_item = QTableWidgetItem(var.get("min", ""))
+            min_item = QTableWidgetItem("")
             self.var_table.setItem(i, 3, min_item)
 
-            max_item = QTableWidgetItem(var.get("max", ""))
+            max_item = QTableWidgetItem("")
             self.var_table.setItem(i, 4, max_item)
 
-            _, unit = parse_value_with_unit(var.get('min', ''))
-            unit_item = QTableWidgetItem(unit)
+            unit_item = QTableWidgetItem(var.get("unit", ""))
             unit_item.setFlags(unit_item.flags() & ~Qt.ItemIsEditable)
             self.var_table.setItem(i, 5, unit_item)
     
@@ -193,6 +188,10 @@ class ConfigPage(QWizardPage):
                         "sample_points": 60,
                         "unit": unit_item.text() if unit_item else "",
                     })
+
+        if not variables:
+            QMessageBox.warning(self, "警告", "请至少选择一个变量并填写最小值和最大值")
+            return False
 
         output_names = [x.strip() for x in self.output_names_edit.text().split(",") if x.strip()]
 

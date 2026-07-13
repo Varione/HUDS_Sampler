@@ -162,6 +162,7 @@ class AEDTPage(QWizardPage):
 
         self._oProject = None
         designs = self._parse_designs_from_aedt(path)
+        print(f"[AEDT] Parsed designs: {designs}")
         self.design_list.clear()
         for d in designs:
             self.design_list.addItem(d)
@@ -169,18 +170,8 @@ class AEDTPage(QWizardPage):
     def _parse_designs_from_aedt(self, aedt_path):
         """Parse design names from .aedt file."""
         try:
-            with open(aedt_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-
-            designs = []
-            for line in lines:
-                if "Name='" in line and ("Design.bmp" in ''.join(lines[lines.index(line):lines.index(line)+5]) or
-                                          any(c in line for c in ['ly', 'ManagedFiles'])):
-                    import re
-                    match = re.search(r"Name='([^']*)'", line)
-                    if match:
-                        designs.append(match.group(1))
-            return list(dict.fromkeys(designs))  # Deduplicate preserving order
+            from huds_app.utils.aedt_parser import parse_aedt_designs
+            return parse_aedt_designs(aedt_path)
         except Exception as e:
             print(f"[AEDT] Failed to parse designs: {e}")
             return []
@@ -215,32 +206,34 @@ class AEDTPage(QWizardPage):
             self.design_list.addItem(dsgn.GetName())
 
     def _on_design_selected(self, row):
-        if row < 0 or not self._oProject:
+        if row < 0:
             return
         design_item = self.design_list.item(row)
         design_name = design_item.text()
 
-        try:
-            oDesign = self._oProject.SetActiveDesign(design_name)
-        except Exception as e:
-            print(f"[AEDT] SetActiveDesign failed: {e}")
-            return
-
+        # Try COM connection first
+        if self._oProject:
+            try:
+                oDesign = self._oProject.SetActiveDesign(design_name)
+            except Exception as e:
+                print(f"[AEDT] SetActiveDesign failed: {e}")
+        
         # Auto-detect variables from .aedt file
-        try:
-            aedt_path = self._oProject.GetPath()
-        except Exception:
-            aedt_path = None
+        aedt_path = getattr(self, '_aedt_file_path', '') or ''
+        if not aedt_path and self._oProject:
+            try:
+                aedt_path = self._oProject.GetPath()
+            except Exception:
+                pass
         
         if aedt_path:
             from huds_app.utils.aedt_parser import parse_aedt_variables
             vars = parse_aedt_variables(aedt_path, design_name)
-            if vars:
-                wizard = self.window()
-                wizard.setProperty("detected_variables", vars)
-                print(f"[AEDT] Detected {len(vars)} variables for design '{design_name}':")
-                for v in vars:
-                    print(f"  {v['name']}: default={v.get('default', 'N/A')}, min={v.get('min', 'N/A')}, max={v.get('max', 'N/A')}")
+            wizard = self.window()
+            wizard.setProperty("detected_variables", vars)
+            print(f"[AEDT] Detected {len(vars)} variables for design '{design_name}':")
+            for v in vars:
+                print(f"  {v['name']}: default={v.get('default', 'N/A')}, unit={v.get('unit', 'N/A')}")
 
     def initializePage(self):
         config = self.window().property("config")
@@ -259,11 +252,16 @@ class AEDTPage(QWizardPage):
         wizard.setProperty("design_name", design_name)
         wizard.setProperty("_oApp", self._oApp)
         wizard.setProperty("_oDesktop", self._oDesktop)
-        if self._oProject:
+        
+        # Save aedt path (file-based or COM-based)
+        if self._aedt_file_path:
+            wizard.setProperty("aedt_path", os.path.dirname(self._aedt_file_path))
+        elif self._oProject:
             try:
                 wizard.setProperty("aedt_path", self._oProject.GetPath())
             except Exception:
                 pass
+        
         return True
 
     def set_next_id(self, nid):

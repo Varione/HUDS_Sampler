@@ -119,11 +119,8 @@ class ConfigPanel(QFrame):
         add_widget(self.device_combo)
 
     def set_detected_variables(self, detected_vars):
-        from huds_app.utils.aedt_parser import parse_value_with_unit
-        
-        filtered = [v for v in detected_vars if v.get('min') and v.get('max')]
-        self.var_table.setRowCount(len(filtered))
-        for i, var in enumerate(filtered):
+        self.var_table.setRowCount(len(detected_vars))
+        for i, var in enumerate(detected_vars):
             cb = QCheckBox()
             cb.setChecked(True)
             cb_widget = QWidget()
@@ -141,14 +138,13 @@ class ConfigPanel(QFrame):
             default_item.setFlags(default_item.flags() & ~Qt.ItemIsEditable)
             self.var_table.setItem(i, 2, default_item)
 
-            min_item = QTableWidgetItem(var.get("min", ""))
+            min_item = QTableWidgetItem("")
             self.var_table.setItem(i, 3, min_item)
 
-            max_item = QTableWidgetItem(var.get("max", ""))
+            max_item = QTableWidgetItem("")
             self.var_table.setItem(i, 4, max_item)
 
-            _, unit = parse_value_with_unit(var.get('min', ''))
-            unit_item = QTableWidgetItem(unit)
+            unit_item = QTableWidgetItem(var.get("unit", ""))
             unit_item.setFlags(unit_item.flags() & ~Qt.ItemIsEditable)
             self.var_table.setItem(i, 5, unit_item)
 
