@@ -12,6 +12,10 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from huds_app.core.config import load_config
+from huds_app.core.storage import read_csv, write_csv
+from huds_app.data.schema import SAMPLE_ID_COLUMN
+
 
 class HUDSWorker(QThread):
     progress_signal = pyqtSignal(int)
@@ -32,9 +36,6 @@ class HUDSWorker(QThread):
         self.log_signal.emit(str(message))
 
     def run(self):
-        from huds_app.core.config import load_config
-        from huds_app.core.storage import read_csv, write_csv
-        from huds_app.data.schema import SAMPLE_ID_COLUMN
         from huds_app.sampling.huds import run_huds_sampling
         from huds_app.data.validation import import_labels as il
         from huds_app.model.train import train_model
