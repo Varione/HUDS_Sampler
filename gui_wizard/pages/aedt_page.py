@@ -164,5 +164,8 @@ class AEDTPage(QWizardPage):
                     wizard.setProperty("aedt_path", config.get("aedt_project_path", ""))
         return True
 
+    def set_next_id(self, nid):
+        self._next_id = nid
+
     def nextId(self):
-        return 2
+        return getattr(self, "_next_id", -1)

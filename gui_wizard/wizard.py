@@ -12,14 +12,24 @@ class HUDSWizard(QWizard):
         self.setWindowTitle("HUDS 主动学习向导")
         self.setWizardStyle(QWizard.ModernStyle)
 
-        self.addPage(ConfigPage())
-        self.addPage(AEDTPage())
-        self.addPage(MonitorPage())
-        self.addPage(ResultPage())
+        cfg_page = ConfigPage()
+        self._cfg_id = self.addPage(cfg_page)
+
+        aedt_page = AEDTPage()
+        self._aedt_id = self.addPage(aedt_page)
+
+        mon_page = MonitorPage()
+        self._mon_id = self.addPage(mon_page)
+
+        res_page = ResultPage()
+        self._res_id = self.addPage(res_page)
+
+        cfg_page.set_next_id(self._aedt_id)
+        aedt_page.set_next_id(self._mon_id)
+        mon_page.set_next_id(self._res_id)
 
     def nextId(self):
-        current = self.currentPageId()
-        page = self.page(current)
+        page = self.currentPage()
         if hasattr(page, "nextId"):
             return page.nextId()
-        return super().nextId()
+        return -1

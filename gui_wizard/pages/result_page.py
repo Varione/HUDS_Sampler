@@ -86,5 +86,8 @@ class ResultPage(QWizardPage):
                 r2_str = f"{r2:.4f}" if not (isinstance(r2, float) and math.isnan(r2)) else "N/A"
                 f.write(f"{i+1},{r2_str},-,完成\n")
 
+    def set_next_id(self, nid):
+        self._next_id = nid
+
     def nextId(self):
-        return -1
+        return getattr(self, "_next_id", -1)

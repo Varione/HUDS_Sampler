@@ -119,6 +119,12 @@ class MonitorPage(QWizardPage):
             wizard = self.window()
             wizard.done(wizard.NextButton | wizard.FinishButton)
 
+    def set_next_id(self, nid):
+        self._next_id = nid
+
+    def nextId(self):
+        return getattr(self, "_next_id", -1)
+
     def initializePage(self):
         self.progress_bar.setValue(0)
         self.step_label.setText("未开始")

@@ -202,5 +202,8 @@ class ConfigPage(QWizardPage):
         wizard.setProperty("config", config)
         return True
 
+    def set_next_id(self, nid):
+        self._next_id = nid
+
     def nextId(self):
-        return 1
+        return getattr(self, "_next_id", -1)
