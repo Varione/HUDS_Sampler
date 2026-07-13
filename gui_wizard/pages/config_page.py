@@ -54,6 +54,11 @@ class ConfigPage(QWizardPage):
         refresh_btn.clicked.connect(self._refresh_variables)
         var_layout.addWidget(refresh_btn)
 
+        layout.addWidget(QLabel("提示: 如果自动检测失败，请手动输入变量名（逗号分隔）"))
+        self.manual_var_edit = QLineEdit()
+        self.manual_var_edit.setPlaceholderText("例如: v1, v2, v3")
+        var_layout.addWidget(self.manual_var_edit)
+
         var_group.setLayout(var_layout)
         layout.addWidget(var_group)
 
@@ -196,6 +201,19 @@ class ConfigPage(QWizardPage):
                     "sample_points": 60,
                     "unit": var_unit,
                 })
+
+        # If no variables selected from table, try manual input
+        if not selected_vars:
+            manual_text = self.manual_var_edit.text().strip()
+            if manual_text:
+                for vname in [x.strip() for x in manual_text.split(",") if x.strip()]:
+                    selected_vars.append({
+                        "name": vname,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "sample_points": 60,
+                        "unit": "",
+                    })
 
         output_names = [x.strip() for x in self.output_names_edit.text().split(",") if x.strip()]
 
