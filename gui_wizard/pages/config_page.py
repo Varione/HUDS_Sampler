@@ -9,7 +9,6 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QComboBox,
     QPushButton,
-    QFileDialog,
     QGroupBox,
     QTableWidget,
     QTableWidgetItem,
@@ -29,17 +28,6 @@ class ConfigPage(QWizardPage):
     def _build_ui(self):
         layout = QVBoxLayout()
         self.setLayout(layout)
-
-        aedt_group = QGroupBox("AEDT 项目路径")
-        aedt_layout = QHBoxLayout()
-        self.aedt_path_edit = QLineEdit()
-        self.aedt_browse_btn = QPushButton("浏览...")
-        self.aedt_browse_btn.clicked.connect(self._browse_aedt)
-        aedt_layout.addWidget(QLabel("项目文件:"))
-        aedt_layout.addWidget(self.aedt_path_edit, 1)
-        aedt_layout.addWidget(self.aedt_browse_btn)
-        aedt_group.setLayout(aedt_layout)
-        layout.addWidget(aedt_group)
 
         var_group = QGroupBox("扫参变量 (从设计中选择)")
         var_layout = QVBoxLayout()
@@ -137,13 +125,6 @@ class ConfigPage(QWizardPage):
         layout.addWidget(train_group)
         layout.addStretch()
 
-    def _browse_aedt(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择 AEDT 项目文件", "", "AEDT Files (*.aedt)"
-        )
-        if path:
-            self.aedt_path_edit.setText(path)
-
     def _refresh_variables(self):
         wizard = self.window()
         detected = wizard.property("detected_variables") or []
@@ -175,12 +156,6 @@ class ConfigPage(QWizardPage):
 
     def initializePage(self):
         wizard = self.window()
-        config = wizard.property("config")
-        if config:
-            aedt_path = config.get("aedt_project_path", "")
-            if aedt_path:
-                self.aedt_path_edit.setText(aedt_path)
-
         detected = wizard.property("detected_variables") or []
         self._populate_var_table(detected)
 
@@ -220,7 +195,7 @@ class ConfigPage(QWizardPage):
         config = {
             "project_name": time.strftime("%Y%m%d_%H%M%S"),
             "random_seed": 42,
-            "aedt_project_path": self.aedt_path_edit.text().strip() or self.window().property("aedt_path", ""),
+            "aedt_project_path": self.window().property("aedt_path") or "",
             "variables": selected_vars,
             "candidate_pool": {"total_samples": self.total_samples_spin.value()},
             "split": {"train_split": 0.8, "val_split": 0.1, "test_split": 0.1},
