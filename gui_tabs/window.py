@@ -22,8 +22,8 @@ class HUDSTabWindow(QMainWindow):
         self.monitor_panel = MonitorPanel()
         self.result_panel = ResultPanel()
 
-        self.tabs.addTab(self.config_panel, "Configuration")
         self.tabs.addTab(self.aedt_panel, "AEDT Connection")
+        self.tabs.addTab(self.config_panel, "Configuration")
         self.tabs.addTab(self.monitor_panel, "Monitor")
         self.tabs.addTab(self.result_panel, "Results")
 
@@ -32,10 +32,17 @@ class HUDSTabWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
     def _on_tab_changed(self, index):
+        if index == 1:
+            self._sync_variables_to_config()
         if index == 2:
             self._sync_to_monitor()
         if index == 3:
             self._sync_to_result()
+
+    def _sync_variables_to_config(self):
+        detected = self.aedt_panel.get_detected_variables()
+        if detected:
+            self.config_panel.set_detected_variables(detected)
 
     def _sync_to_monitor(self):
         config = self.config_panel.get_config()

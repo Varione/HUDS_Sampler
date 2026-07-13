@@ -11,6 +11,11 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QFileDialog,
     QGroupBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QCheckBox,
+    QWidget,
 )
 
 
@@ -18,7 +23,7 @@ class ConfigPage(QWizardPage):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setTitle("配置参数")
-        self.setSubTitle("设置仿真变量、训练参数和计算设备")
+        self.setSubTitle("从 AEDT 设计中选择扫参变量，设置训练参数")
         self._build_ui()
 
     def _build_ui(self):
@@ -36,49 +41,42 @@ class ConfigPage(QWizardPage):
         aedt_group.setLayout(aedt_layout)
         layout.addWidget(aedt_group)
 
-        var_group = QGroupBox("扫参变量")
+        var_group = QGroupBox("扫参变量 (从设计中选择)")
         var_layout = QVBoxLayout()
+
+        self.var_table = QTableWidget(0, 5)
+        self.var_table.setHorizontalHeaderLabels(["选择", "变量名", "默认值", "单位", "说明"])
+        self.var_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.var_table.setColumnHidden(4, True)
+        var_layout.addWidget(self.var_table)
+
+        refresh_btn = QPushButton("刷新变量列表")
+        refresh_btn.clicked.connect(self._refresh_variables)
+        var_layout.addWidget(refresh_btn)
+
+        var_group.setLayout(var_layout)
+        layout.addWidget(var_group)
+
+        output_group = QGroupBox("输出设置")
+        output_layout = QVBoxLayout()
+
         row1 = QHBoxLayout()
-        row1.addWidget(QLabel("变量名:"))
-        self.var_names_edit = QLineEdit("v")
-        row1.addWidget(self.var_names_edit, 1)
-        var_layout.addLayout(row1)
+        row1.addWidget(QLabel("仿真输出变量:"))
+        self.output_names_edit = QLineEdit("peak_force_y,peak_force_z")
+        row1.addWidget(self.output_names_edit, 1)
+        output_layout.addLayout(row1)
 
         row2 = QHBoxLayout()
-        row2.addWidget(QLabel("最小值:"))
-        self.var_mins_edit = QLineEdit("100")
-        row2.addWidget(self.var_mins_edit, 1)
-        var_layout.addLayout(row2)
-
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("最大值:"))
-        self.var_maxs_edit = QLineEdit("500")
-        row3.addWidget(self.var_maxs_edit, 1)
-        var_layout.addLayout(row3)
-
-        row4 = QHBoxLayout()
-        row4.addWidget(QLabel("单位:"))
-        self.var_units_edit = QLineEdit("km_per_hour")
-        row4.addWidget(self.var_units_edit, 1)
-        var_layout.addLayout(row4)
-
-        row5 = QHBoxLayout()
-        row5.addWidget(QLabel("输出变量:"))
-        self.output_names_edit = QLineEdit("peak_force_y,peak_force_z")
-        row5.addWidget(self.output_names_edit, 1)
-        var_layout.addLayout(row5)
-
-        row6 = QHBoxLayout()
-        row6.addWidget(QLabel("稳态提取比例:"))
+        row2.addWidget(QLabel("稳态提取比例:"))
         self.steady_pct_spin = QDoubleSpinBox()
         self.steady_pct_spin.setRange(0.01, 1.0)
         self.steady_pct_spin.setSingleStep(0.05)
         self.steady_pct_spin.setValue(0.2)
-        row6.addWidget(self.steady_pct_spin)
-        var_layout.addLayout(row6)
+        row2.addWidget(self.steady_pct_spin)
+        output_layout.addLayout(row2)
 
-        var_group.setLayout(var_layout)
-        layout.addWidget(var_group)
+        output_group.setLayout(output_layout)
+        layout.addWidget(output_group)
 
         train_group = QGroupBox("训练设置")
         train_layout = QVBoxLayout()
@@ -141,35 +139,71 @@ class ConfigPage(QWizardPage):
         if path:
             self.aedt_path_edit.setText(path)
 
+    def _refresh_variables(self):
+        wizard = self.window()
+        detected = wizard.property("detected_variables") or []
+        self._populate_var_table(detected)
+
+    def _populate_var_table(self, detected_vars):
+        self.var_table.setRowCount(len(detected_vars))
+        for i, var in enumerate(detected_vars):
+            cb = QCheckBox()
+            cb.setChecked(True)
+            cb_widget = QWidget()
+            cb_layout = QHBoxLayout(cb_widget)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(cb, 0x02 | 0x40)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            self.var_table.setCellWidget(i, 0, cb_widget)
+
+            name_item = QTableWidgetItem(var.get("name", ""))
+            name_item.setFlags(name_item.flags() & ~2)
+            self.var_table.setItem(i, 1, name_item)
+
+            val_item = QTableWidgetItem(var.get("value", ""))
+            val_item.setFlags(val_item.flags() & ~2)
+            self.var_table.setItem(i, 2, val_item)
+
+            unit_item = QTableWidgetItem(var.get("unit", ""))
+            unit_item.setFlags(unit_item.flags() & ~2)
+            self.var_table.setItem(i, 3, unit_item)
+
     def initializePage(self):
-        pass
+        wizard = self.window()
+        config = wizard.property("config")
+        if config:
+            aedt_path = config.get("aedt_project_path", "")
+            if aedt_path:
+                self.aedt_path_edit.setText(aedt_path)
+
+        detected = wizard.property("detected_variables") or []
+        self._populate_var_table(detected)
 
     def validatePage(self):
-        var_names = [x.strip() for x in self.var_names_edit.text().split(",") if x.strip()]
-        var_mins = [float(x.strip()) for x in self.var_mins_edit.text().split(",") if x.strip()]
-        var_maxs = [float(x.strip()) for x in self.var_maxs_edit.text().split(",") if x.strip()]
-        var_units_raw = self.var_units_edit.text()
-        var_units = [x.strip() for x in var_units_raw.split(",") if x.strip()]
+        selected_vars = []
+        for i in range(self.var_table.rowCount()):
+            cb_widget = self.var_table.cellWidget(i)
+            cb = cb_widget.findChild(QCheckBox) if cb_widget else None
+            if cb and cb.isChecked():
+                name_item = self.var_table.item(i, 1)
+                unit_item = self.var_table.item(i, 3)
+                var_name = name_item.text() if name_item else ""
+                var_unit = unit_item.text() if unit_item else ""
+                selected_vars.append({
+                    "name": var_name,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "sample_points": 60,
+                    "unit": var_unit,
+                })
+
         output_names = [x.strip() for x in self.output_names_edit.text().split(",") if x.strip()]
-
-        while len(var_units) < len(var_names):
-            var_units.append("")
-
-        variables = []
-        for i, name in enumerate(var_names):
-            variables.append({
-                "name": name,
-                "min": var_mins[i] if i < len(var_mins) else 0.0,
-                "max": var_maxs[i] if i < len(var_maxs) else 1.0,
-                "sample_points": 60,
-                "unit": var_units[i] if i < len(var_units) else "",
-            })
 
         config = {
             "project_name": time.strftime("%Y%m%d_%H%M%S"),
             "random_seed": 42,
-            "aedt_project_path": self.aedt_path_edit.text().strip(),
-            "variables": variables,
+            "aedt_project_path": self.aedt_path_edit.text().strip() or self.window().property("aedt_path", ""),
+            "variables": selected_vars,
             "candidate_pool": {"total_samples": self.total_samples_spin.value()},
             "split": {"train_split": 0.8, "val_split": 0.1, "test_split": 0.1},
             "model": {

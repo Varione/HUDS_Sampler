@@ -46,13 +46,13 @@ class HUDSModernWindow(QMainWindow):
         self.monitor_page = MonitorPage()
         self.result_page = ResultPage()
 
-        self.stack.addWidget(self.config_page)
         self.stack.addWidget(self.aedt_page)
+        self.stack.addWidget(self.config_page)
         self.stack.addWidget(self.monitor_page)
         self.stack.addWidget(self.result_page)
 
         self.sidebar = QListWidget()
-        items = ["Configuration", "AEDT Connection", "Monitor", "Results"]
+        items = ["AEDT Connection", "Configuration", "Monitor", "Results"]
         for item_text in items:
             self.sidebar.addItem(item_text)
         self.sidebar.currentRowChanged.connect(self._on_nav_changed)
@@ -72,6 +72,10 @@ class HUDSModernWindow(QMainWindow):
 
     def _on_nav_changed(self, row):
         self.stack.setCurrentIndex(row)
+        if row == 1:
+            detected = self.aedt_page.get_detected_variables()
+            if detected:
+                self.config_page.set_detected_variables(detected)
 
 
 class SidebarTitle(QWidget):

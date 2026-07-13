@@ -1,4 +1,6 @@
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -12,6 +14,9 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QGroupBox,
     QComboBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
 )
 
 
@@ -46,30 +51,15 @@ class ConfigPage(QWidget):
         project_group.setLayout(project_layout)
         layout.addWidget(project_group)
 
-        var_group = QGroupBox("Sweep Variables")
+        var_group = QGroupBox("Sweep Variables (select from design)")
         var_layout = QVBoxLayout()
 
-        self.var_name = QLineEdit()
-        self.var_name.setText("v")
-        self.var_min = QDoubleSpinBox()
-        self.var_min.setValue(100.0)
-        self.var_min.setRange(-1e6, 1e6)
-        self.var_max = QDoubleSpinBox()
-        self.var_max.setValue(500.0)
-        self.var_max.setRange(-1e6, 1e6)
-        self.var_unit = QLineEdit()
-        self.var_unit.setText("km_per_hour")
-        self.var_points = QSpinBox()
-        self.var_points.setValue(60)
-        self.var_points.setMinimum(1)
+        self.var_table = QTableWidget(0, 4)
+        self.var_table.setHorizontalHeaderLabels(["Select", "Name", "Default", "Unit"])
+        self.var_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.var_table.setColumnHidden(3, True)
+        var_layout.addWidget(self.var_table)
 
-        var_form = QFormLayout()
-        var_form.addRow("Variable Name:", self.var_name)
-        var_form.addRow("Min Value:", self.var_min)
-        var_form.addRow("Max Value:", self.var_max)
-        var_form.addRow("Unit:", self.var_unit)
-        var_form.addRow("Sample Points:", self.var_points)
-        var_layout.addLayout(var_form)
         var_group.setLayout(var_layout)
         layout.addWidget(var_group)
 
@@ -169,6 +159,30 @@ class ConfigPage(QWidget):
         scroll.setWidget(content)
         main_layout.addWidget(scroll)
 
+    def set_detected_variables(self, detected_vars):
+        self.var_table.setRowCount(len(detected_vars))
+        for i, var in enumerate(detected_vars):
+            cb = QCheckBox()
+            cb.setChecked(True)
+            cb_widget = QWidget()
+            cb_layout = QHBoxLayout(cb_widget)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(cb, Qt.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            self.var_table.setCellWidget(i, 0, cb_widget)
+
+            name_item = QTableWidgetItem(var.get("name", ""))
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+            self.var_table.setItem(i, 1, name_item)
+
+            val_item = QTableWidgetItem(var.get("value", ""))
+            val_item.setFlags(val_item.flags() & ~Qt.ItemIsEditable)
+            self.var_table.setItem(i, 2, val_item)
+
+            unit_item = QTableWidgetItem(var.get("unit", ""))
+            unit_item.setFlags(unit_item.flags() & ~Qt.ItemIsEditable)
+            self.var_table.setItem(i, 3, unit_item)
+
     def get_config(self):
         import time
         project_name = self.project_name.text().strip()
@@ -179,20 +193,27 @@ class ConfigPage(QWidget):
             x.strip() for x in self.output_names.text().split(",") if x.strip()
         ]
 
+        selected_vars = []
+        for i in range(self.var_table.rowCount()):
+            cb_widget = self.var_table.cellWidget(i, 0)
+            cb = cb_widget.findChild(QCheckBox) if cb_widget else None
+            if cb and cb.isChecked():
+                name_item = self.var_table.item(i, 1)
+                unit_item = self.var_table.item(i, 3)
+                selected_vars.append({
+                    "name": name_item.text() if name_item else "",
+                    "min": 0.0,
+                    "max": 1.0,
+                    "sample_points": 60,
+                    "unit": unit_item.text() if unit_item else "",
+                })
+
         return {
             "project_name": project_name,
             "random_seed": self.random_seed.value(),
             "aedt_project_path": "",
             "design_name": "",
-            "variables": [
-                {
-                    "name": self.var_name.text().strip() or "v",
-                    "min": self.var_min.value(),
-                    "max": self.var_max.value(),
-                    "sample_points": self.var_points.value(),
-                    "unit": self.var_unit.text().strip(),
-                }
-            ],
+            "variables": selected_vars,
             "candidate_pool": {
                 "total_samples": self.total_samples.value()
             },

@@ -54,7 +54,10 @@ class AEDTPanel(QFrame):
         layout.addWidget(QLabel("Design:"), row, 0)
         self.design_combo = QComboBox()
         self.design_combo.setEnabled(False)
+        self.design_combo.currentIndexChanged.connect(self._on_design_changed)
         layout.addWidget(self.design_combo, row, 1, 1, 2)
+
+        self._detected_vars = []
 
     def _on_connect(self):
         try:
@@ -126,6 +129,39 @@ class AEDTPanel(QFrame):
         self.design_combo.clear()
         for i in range(designs.Count):
             self.design_combo.addItem(designs(i).GetName())
+
+    def _on_design_changed(self, index):
+        if index < 0 or not self.oProject:
+            return
+        design_name = self.design_combo.currentText()
+        try:
+            oDesign = self.oProject.SetActiveDesign(design_name)
+        except Exception:
+            return
+
+        detected_vars = []
+        try:
+            oModule = oDesign.GetModule("DesignData")
+            var_names_list = oModule.GetVariableNames()
+            if hasattr(var_names_list, '__iter__'):
+                for vname in list(var_names_list):
+                    info = {"name": str(vname)}
+                    try:
+                        info["value"] = str(oModule.GetVariableValue(vname))
+                    except Exception:
+                        info["value"] = ""
+                    try:
+                        info["unit"] = str(oModule.GetVariableUnit(str(vname)))
+                    except Exception:
+                        info["unit"] = ""
+                    detected_vars.append(info)
+        except Exception:
+            pass
+
+        self._detected_vars = detected_vars
+
+    def get_detected_variables(self):
+        return self._detected_vars
 
     def get_aedt_info(self):
         project_path = ""

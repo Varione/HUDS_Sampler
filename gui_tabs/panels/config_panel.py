@@ -1,12 +1,19 @@
+import time
 from PyQt5.QtCore import Qt, QObject, pyqtSignal
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QWidget,
 )
 
 
@@ -43,25 +50,13 @@ class ConfigPanel(QFrame):
         self.aedt_path_edit.setPlaceholderText("E:\\project\\model.aedt")
         add_widget(self.aedt_path_edit, stretch=2)
 
-        # Variable names
-        add_label("Variable Names (comma separated)")
-        self.var_names_edit = QLineEdit("v")
-        add_widget(self.var_names_edit, stretch=2)
-
-        # Variable mins
-        add_label("Variable Mins (comma separated)")
-        self.var_mins_edit = QLineEdit("100")
-        add_widget(self.var_mins_edit, stretch=2)
-
-        # Variable maxs
-        add_label("Variable Maxs (comma separated)")
-        self.var_maxs_edit = QLineEdit("500")
-        add_widget(self.var_maxs_edit, stretch=2)
-
-        # Variable units
-        add_label("Variable Units (comma separated)")
-        self.var_units_edit = QLineEdit("km_per_hour")
-        add_widget(self.var_units_edit, stretch=2)
+        # Variable selection table
+        add_label("Design Variables (select):", col=0)
+        self.var_table = QTableWidget(0, 4)
+        self.var_table.setHorizontalHeaderLabels(["Select", "Name", "Default", "Unit"])
+        self.var_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.var_table.setColumnHidden(3, True)
+        add_widget(self.var_table, col=1, stretch=2)
 
         # Output names
         add_label("Output Names (comma separated)")
@@ -123,34 +118,56 @@ class ConfigPanel(QFrame):
         self.device_combo.setCurrentText("cpu")
         add_widget(self.device_combo)
 
-    def _parse_list(self, text):
-        return [x.strip() for x in text.split(",") if x.strip()]
+    def set_detected_variables(self, detected_vars):
+        self.var_table.setRowCount(len(detected_vars))
+        for i, var in enumerate(detected_vars):
+            cb = QCheckBox()
+            cb.setChecked(True)
+            cb_widget = QWidget()
+            cb_layout = QHBoxLayout(cb_widget)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(cb, Qt.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            self.var_table.setCellWidget(i, 0, cb_widget)
 
-    def _parse_floats(self, text):
-        return [float(x.strip()) for x in text.split(",") if x.strip()]
+            name_item = QTableWidgetItem(var.get("name", ""))
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+            self.var_table.setItem(i, 1, name_item)
+
+            val_item = QTableWidgetItem(var.get("value", ""))
+            val_item.setFlags(val_item.flags() & ~Qt.ItemIsEditable)
+            self.var_table.setItem(i, 2, val_item)
+
+            unit_item = QTableWidgetItem(var.get("unit", ""))
+            unit_item.setFlags(unit_item.flags() & ~Qt.ItemIsEditable)
+            self.var_table.setItem(i, 3, unit_item)
 
     def get_config(self):
-        var_names = self._parse_list(self.var_names_edit.text())
-        var_mins = self._parse_floats(self.var_mins_edit.text())
-        var_maxs = self._parse_floats(self.var_maxs_edit.text())
-        var_units = self._parse_list(self.var_units_edit.text())
+        selected_vars = []
+        for i in range(self.var_table.rowCount()):
+            cb_widget = self.var_table.cellWidget(i, 0)
+            cb = cb_widget.findChild(QCheckBox) if cb_widget else None
+            if cb and cb.isChecked():
+                name_item = self.var_table.item(i, 1)
+                unit_item = self.var_table.item(i, 3)
+                var_name = name_item.text() if name_item else ""
+                var_unit = unit_item.text() if unit_item else ""
+                selected_vars.append({
+                    "name": var_name,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "sample_points": 60,
+                    "unit": var_unit,
+                })
 
-        variables = []
-        for i, name in enumerate(var_names):
-            variables.append({
-                "name": name,
-                "min": var_mins[i] if i < len(var_mins) else 0.0,
-                "max": var_maxs[i] if i < len(var_maxs) else 1.0,
-                "sample_points": 60,
-                "unit": var_units[i] if i < len(var_units) else "",
-            })
+        output_names = [x.strip() for x in self.output_names_edit.text().split(",") if x.strip()]
 
         return {
-            "project_name": "",
+            "project_name": time.strftime("%Y%m%d_%H%M%S"),
             "random_seed": 42,
             "aedt_project_path": self.aedt_path_edit.text().strip(),
             "design_name": "",
-            "variables": variables,
+            "variables": selected_vars,
             "candidate_pool": {
                 "total_samples": self.total_samples_spin.value(),
             },
@@ -161,7 +178,7 @@ class ConfigPanel(QFrame):
             },
             "model": {
                 "model_type": "vector_to_vector",
-                "output_names": self._parse_list(self.output_names_edit.text()),
+                "output_names": output_names,
                 "hidden_dim": 64,
                 "encoder_blocks": 2,
                 "dropout": 0.1,

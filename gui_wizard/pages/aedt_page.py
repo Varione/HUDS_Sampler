@@ -41,6 +41,7 @@ class AEDTPage(QWizardPage):
 
         layout.addWidget(QLabel("设计列表:"))
         self.design_list = QListWidget()
+        self.design_list.currentRowChanged.connect(self._on_design_selected)
         layout.addWidget(self.design_list)
 
         layout.addStretch()
@@ -140,6 +141,38 @@ class AEDTPage(QWizardPage):
             dsgn = designs(i)
             self.design_list.addItem(dsgn.GetName())
 
+    def _on_design_selected(self, row):
+        if row < 0 or not self._oProject:
+            return
+        design_item = self.design_list.item(row)
+        design_name = design_item.text()
+        try:
+            oDesign = self._oProject.SetActiveDesign(design_name)
+        except Exception:
+            return
+
+        detected_vars = []
+        try:
+            oModule = oDesign.GetModule("DesignData")
+            var_names_list = oModule.GetVariableNames()
+            if hasattr(var_names_list, '__iter__'):
+                for vname in list(var_names_list):
+                    info = {"name": str(vname)}
+                    try:
+                        info["value"] = str(oModule.GetVariableValue(vname))
+                    except Exception:
+                        info["value"] = ""
+                    try:
+                        info["unit"] = str(oModule.GetVariableUnit(str(vname)))
+                    except Exception:
+                        info["unit"] = ""
+                    detected_vars.append(info)
+        except Exception:
+            pass
+
+        wizard = self.window()
+        wizard.setProperty("detected_variables", detected_vars)
+
     def initializePage(self):
         config = self.window().property("config")
         if config and config.get("aedt_project_path"):
@@ -155,6 +188,8 @@ class AEDTPage(QWizardPage):
         design_name = design_item.text()
         wizard = self.window()
         wizard.setProperty("design_name", design_name)
+        wizard.setProperty("_oApp", self._oApp)
+        wizard.setProperty("_oDesktop", self._oDesktop)
         if self._oProject:
             try:
                 wizard.setProperty("aedt_path", self._oProject.GetPath())

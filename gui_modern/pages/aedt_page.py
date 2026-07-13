@@ -187,6 +187,32 @@ class AEDTPage(QWidget):
         if self.design_list.count() > 0:
             self._design_name = self.design_list.item(row).text()
 
+        detected_vars = []
+        if self._oProject:
+            try:
+                oDesign = self._oProject.SetActiveDesign(self._design_name)
+                oModule = oDesign.GetModule("DesignData")
+                var_names_list = oModule.GetVariableNames()
+                if hasattr(var_names_list, '__iter__'):
+                    for vname in list(var_names_list):
+                        info = {"name": str(vname)}
+                        try:
+                            info["value"] = str(oModule.GetVariableValue(vname))
+                        except Exception:
+                            info["value"] = ""
+                        try:
+                            info["unit"] = str(oModule.GetVariableUnit(str(vname)))
+                        except Exception:
+                            info["unit"] = ""
+                        detected_vars.append(info)
+            except Exception:
+                pass
+
+        self._detected_vars = detected_vars
+
+    def get_detected_variables(self):
+        return getattr(self, '_detected_vars', [])
+
     def get_aedt_info(self):
         return self._aedt_path, self._design_name
 
