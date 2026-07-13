@@ -54,10 +54,10 @@ class ConfigPage(QWidget):
         var_group = QGroupBox("Sweep Variables (select from design)")
         var_layout = QVBoxLayout()
 
-        self.var_table = QTableWidget(0, 4)
-        self.var_table.setHorizontalHeaderLabels(["Select", "Name", "Default", "Unit"])
+        self.var_table = QTableWidget(0, 6)
+        self.var_table.setHorizontalHeaderLabels(["Select", "Name", "Default", "Min", "Max", "Unit"])
         self.var_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.var_table.setColumnHidden(3, True)
+        self.var_table.setColumnHidden(5, True)
         var_layout.addWidget(self.var_table)
 
         var_group.setLayout(var_layout)
@@ -160,8 +160,11 @@ class ConfigPage(QWidget):
         main_layout.addWidget(scroll)
 
     def set_detected_variables(self, detected_vars):
-        self.var_table.setRowCount(len(detected_vars))
-        for i, var in enumerate(detected_vars):
+        from huds_app.utils.aedt_parser import parse_value_with_unit
+        
+        filtered = [v for v in detected_vars if v.get('min') and v.get('max')]
+        self.var_table.setRowCount(len(filtered))
+        for i, var in enumerate(filtered):
             cb = QCheckBox()
             cb.setChecked(True)
             cb_widget = QWidget()
@@ -175,13 +178,22 @@ class ConfigPage(QWidget):
             name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
             self.var_table.setItem(i, 1, name_item)
 
-            val_item = QTableWidgetItem(var.get("value", ""))
-            val_item.setFlags(val_item.flags() & ~Qt.ItemIsEditable)
-            self.var_table.setItem(i, 2, val_item)
+            default_item = QTableWidgetItem(var.get("default", ""))
+            default_item.setFlags(default_item.flags() & ~Qt.ItemIsEditable)
+            self.var_table.setItem(i, 2, default_item)
 
-            unit_item = QTableWidgetItem(var.get("unit", ""))
+            min_item = QTableWidgetItem(var.get("min", ""))
+            min_item.setFlags(min_item.flags() & ~Qt.ItemIsEditable)
+            self.var_table.setItem(i, 3, min_item)
+
+            max_item = QTableWidgetItem(var.get("max", ""))
+            max_item.setFlags(max_item.flags() & ~Qt.ItemIsEditable)
+            self.var_table.setItem(i, 4, max_item)
+
+            _, unit = parse_value_with_unit(var.get('min', ''))
+            unit_item = QTableWidgetItem(unit)
             unit_item.setFlags(unit_item.flags() & ~Qt.ItemIsEditable)
-            self.var_table.setItem(i, 3, unit_item)
+            self.var_table.setItem(i, 5, unit_item)
 
     def get_config(self):
         import time
@@ -199,11 +211,20 @@ class ConfigPage(QWidget):
             cb = cb_widget.findChild(QCheckBox) if cb_widget else None
             if cb and cb.isChecked():
                 name_item = self.var_table.item(i, 1)
-                unit_item = self.var_table.item(i, 3)
+                min_item = self.var_table.item(i, 3)
+                max_item = self.var_table.item(i, 4)
+                unit_item = self.var_table.item(i, 5)
+                
+                from huds_app.utils.aedt_parser import parse_value_with_unit
+                min_str = min_item.text() if min_item else ""
+                max_str = max_item.text() if max_item else ""
+                min_num, _ = parse_value_with_unit(min_str)
+                max_num, _ = parse_value_with_unit(max_str)
+                
                 selected_vars.append({
                     "name": name_item.text() if name_item else "",
-                    "min": 0.0,
-                    "max": 1.0,
+                    "min": float(min_num) if min_num is not None else 0.0,
+                    "max": float(max_num) if max_num is not None else 1.0,
                     "sample_points": 60,
                     "unit": unit_item.text() if unit_item else "",
                 })

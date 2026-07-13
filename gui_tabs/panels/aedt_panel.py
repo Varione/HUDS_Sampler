@@ -141,18 +141,16 @@ class AEDTPanel(QFrame):
 
         detected_vars = []
         try:
-            var_names_list = oDesign.GetVariableNames()
-            if hasattr(var_names_list, '__iter__') and not isinstance(var_names_list, str):
-                for vname in list(var_names_list):
-                    name_str = str(vname).strip()
-                    if name_str:
-                        info = {"name": name_str, "value": "", "unit": ""}
-                        detected_vars.append(info)
+            aedt_path = self.oProject.GetPath()
+            from huds_app.utils.aedt_parser import parse_aedt_variables
+            detected_vars = parse_aedt_variables(aedt_path, design_name)
         except Exception as e:
-            print(f"[AEDT] GetVariableNames failed: {e}")
+            print(f"[AEDT] Variable detection failed: {e}")
 
         self._detected_vars = detected_vars
-        print(f"[AEDT] Detected {len(detected_vars)} variables: {[v['name'] for v in detected_vars]}")
+        print(f"[AEDT] Detected {len(detected_vars)} variables:")
+        for v in detected_vars:
+            print(f"  {v['name']}: default={v.get('default', 'N/A')}, min={v.get('min', 'N/A')}, max={v.get('max', 'N/A')}")
 
     def get_detected_variables(self):
         return self._detected_vars
