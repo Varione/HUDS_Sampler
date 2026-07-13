@@ -172,18 +172,37 @@ def connect_aedt():
 
 def open_project(oDesktop, project_path):
     """打开或获取已打开的项目"""
+    # Handle both file path and directory path
+    if os.path.isdir(project_path):
+        aedt_files = [f for f in os.listdir(project_path) if f.endswith('.aedt')]
+        if not aedt_files:
+            raise FileNotFoundError(f"No .aedt file found in: {project_path}")
+        project_path = os.path.join(project_path, aedt_files[0])
+
     lock_file = project_path + ".lock"
     if os.path.exists(lock_file):
         os.remove(lock_file)
 
-    # 检查是否已打开
+    # 检查是否已打开 — use exact path match first, then name match
     projects = oDesktop.GetProjects()
     base_name = os.path.basename(project_path).replace('.aedt', '')
+    matched_project = None
     for i in range(projects.Count):
         p = projects(i)
-        if base_name in p.GetName():
-            print(f"项目已在内存中: {p.GetName()}")
-            return p
+        try:
+            p_path = p.GetPath()
+            if os.path.samefile(p_path, project_path):
+                matched_project = p
+                break
+        except Exception:
+            pass
+        if p.GetName() == base_name:
+            matched_project = p
+            break
+
+    if matched_project:
+        print(f"项目已在内存中: {matched_project.GetName()}")
+        return matched_project
 
     print(f"正在打开项目: {project_path}")
     oProject = oDesktop.OpenProject(project_path)
@@ -202,6 +221,7 @@ def list_designs(oProject):
 
 def select_design(oProject, design_name):
     """选择设计"""
+    design_name = design_name.strip()
     oDesign = oProject.SetActiveDesign(design_name)
     print(f"已激活设计: {oDesign.GetName()}")
     return oDesign

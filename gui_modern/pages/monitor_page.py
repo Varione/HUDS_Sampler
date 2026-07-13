@@ -82,7 +82,7 @@ class MonitorPage(QWidget):
         config["aedt_project_path"] = aedt_path
         config["design_name"] = design_name
         import os
-        project_dir = os.path.dirname(aedt_path)
+        project_dir = os.path.dirname(aedt_path) if os.path.isfile(aedt_path) else aedt_path
 
         self._log("Starting HUDS Active Learning workflow...")
         self._log(f"Project: {aedt_path}")

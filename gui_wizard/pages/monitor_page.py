@@ -70,7 +70,8 @@ class MonitorPage(QWizardPage):
         config["aedt_project_path"] = aedt_path
         config["design_name"] = design_name
 
-        project_dir = os.path.dirname(aedt_path)
+        # aedt_path is the .aedt file path; project_dir is its containing folder
+        project_dir = os.path.dirname(aedt_path) if os.path.isfile(aedt_path) else aedt_path
         runs_dir = os.path.join(project_dir, "HUDS_runs")
         run_dir = os.path.join(runs_dir, config["project_name"])
         os.makedirs(run_dir, exist_ok=True)

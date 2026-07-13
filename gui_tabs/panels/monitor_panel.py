@@ -81,7 +81,7 @@ class MonitorPanel(QFrame):
         config["aedt_project_path"] = self._aedt_path
         config["project_name"] = time.strftime("%Y%m%d_%H%M%S")
 
-        project_dir = os.path.dirname(self._aedt_path)
+        project_dir = os.path.dirname(self._aedt_path) if os.path.isfile(self._aedt_path) else self._aedt_path
         runs_dir = os.path.join(project_dir, "HUDS_runs")
         run_dir = os.path.join(runs_dir, config["project_name"])
         os.makedirs(run_dir, exist_ok=True)

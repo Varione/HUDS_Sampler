@@ -176,6 +176,8 @@ class HUDSWorker(QThread):
                 self.aedt_path,
                 "--design",
                 self.design_name,
+                "--output-dir",
+                os.path.dirname(self.aedt_path) if os.path.isfile(self.aedt_path) else self.aedt_path,
             ],
             capture_output=True,
             text=True,
@@ -193,7 +195,8 @@ class HUDSWorker(QThread):
                 self.log(f"  输出:\n{out}")
             raise RuntimeError("maxwell_sweep.py failed")
 
-        output_csv = os.path.join(os.path.dirname(self.aedt_path), "Force Plot 1.csv")
+        project_dir = os.path.dirname(self.aedt_path) if os.path.isfile(self.aedt_path) else self.aedt_path
+        output_csv = os.path.join(project_dir, "Force Plot 1.csv")
         if os.path.exists(output_csv):
             size = os.path.getsize(output_csv)
             self.log(f"  已导出: {output_csv} ({size} bytes)")

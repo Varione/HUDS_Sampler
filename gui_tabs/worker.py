@@ -137,7 +137,8 @@ class HUDSWorker:
         )
         result = subprocess.run(
             [sys.executable, sweep_script, "--csv", request_csv,
-             "--config", cfg_path, "--project", aedt_path, "--design", dsgn_name],
+             "--config", cfg_path, "--project", aedt_path, "--design", dsgn_name,
+             "--output-dir", os.path.dirname(aedt_path) if os.path.isfile(aedt_path) else aedt_path],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=600, env=env,
         )
@@ -149,7 +150,8 @@ class HUDSWorker:
                 self._log(f"  Output:\n{out}")
             raise RuntimeError("maxwell_sweep.py failed")
 
-        output_csv = os.path.join(os.path.dirname(aedt_path), "Force Plot 1.csv")
+        project_dir = os.path.dirname(aedt_path) if os.path.isfile(aedt_path) else aedt_path
+        output_csv = os.path.join(project_dir, "Force Plot 1.csv")
         if os.path.exists(output_csv):
             size = os.path.getsize(output_csv)
             self._log(f"  Exported: {output_csv} ({size} bytes)")

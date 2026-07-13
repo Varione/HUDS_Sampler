@@ -258,9 +258,9 @@ class AEDTPage(QWizardPage):
         wizard.setProperty("_oApp", self._oApp)
         wizard.setProperty("_oDesktop", self._oDesktop)
         
-        # Save aedt path (file-based or COM-based)
+        # Save aedt path (file-based or COM-based) — always full .aedt file path
         if self._aedt_file_path:
-            wizard.setProperty("aedt_path", os.path.dirname(self._aedt_file_path))
+            wizard.setProperty("aedt_path", self._aedt_file_path)
         elif self._oProject:
             try:
                 wizard.setProperty("aedt_path", self._oProject.GetPath())
