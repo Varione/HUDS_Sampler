@@ -79,7 +79,7 @@ class HUDSWorker:
                     return
 
                 force_csv = self._run_maxwell_sweep(
-                    request_path, config_path, self.aedt_path, self.design_name
+                    request_path, config_path, self.aedt_path, self.design_name, step, run_dir
                 )
 
                 if self.abort:
@@ -127,7 +127,7 @@ class HUDSWorker:
             self._log(traceback.format_exc())
             self.signals.finished_signal.emit(False, str(e))
 
-    def _run_maxwell_sweep(self, request_csv, cfg_path, aedt_path, dsgn_name):
+    def _run_maxwell_sweep(self, request_csv, cfg_path, aedt_path, dsgn_name, step, run_dir):
         self._log("  Running Maxwell simulation...")
         env = os.environ.copy()
         env["ANSYSLMD_LICENSE_FILE"] = "24500@licensing.hkust.edu.cn"
@@ -153,6 +153,13 @@ class HUDSWorker:
         if os.path.exists(output_csv):
             size = os.path.getsize(output_csv)
             self._log(f"  Exported: {output_csv} ({size} bytes)")
+
+            import shutil
+            raw_dir = os.path.join(run_dir, "raw_outputs")
+            os.makedirs(raw_dir, exist_ok=True)
+            dest = os.path.join(raw_dir, f"step{step}_force_timeseries.csv")
+            shutil.copy2(output_csv, dest)
+            self._log(f"  Saved raw timeseries: {dest}")
             return output_csv
         raise RuntimeError("Simulation output file not found")
 

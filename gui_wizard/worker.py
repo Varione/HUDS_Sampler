@@ -78,7 +78,7 @@ class HUDSWorker(QThread):
                 return
 
             try:
-                force_csv = self._run_maxwell_sweep(request_path, config_path)
+                force_csv = self._run_maxwell_sweep(request_path, config_path, step)
             except Exception as e:
                 self.log(f"  Maxwell 仿真失败: {e}")
                 self.finished_signal.emit(False, f"步骤 {step} 仿真失败: {e}")
@@ -151,13 +151,9 @@ class HUDSWorker(QThread):
         else:
             summary = "R2 不可用 (验证集样本不足)"
 
-        wizard = self.window()
-        if wizard:
-            wizard.setProperty("r2_history", r2_history)
-
         self.finished_signal.emit(True, summary)
 
-    def _run_maxwell_sweep(self, request_csv, cfg_path):
+    def _run_maxwell_sweep(self, request_csv, cfg_path, step):
         self.log("  运行 Maxwell 仿真...")
         env = os.environ.copy()
         env["ANSYSLMD_LICENSE_FILE"] = "24500@licensing.hkust.edu.cn"
@@ -201,6 +197,13 @@ class HUDSWorker(QThread):
         if os.path.exists(output_csv):
             size = os.path.getsize(output_csv)
             self.log(f"  已导出: {output_csv} ({size} bytes)")
+
+            import shutil
+            raw_dir = os.path.join(self.run_dir, "raw_outputs")
+            os.makedirs(raw_dir, exist_ok=True)
+            dest = os.path.join(raw_dir, f"step{step}_force_timeseries.csv")
+            shutil.copy2(output_csv, dest)
+            self.log(f"  已保存原始时序文件: {dest}")
             return output_csv
         raise RuntimeError("仿真结果文件不存在")
 
