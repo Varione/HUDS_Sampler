@@ -153,22 +153,30 @@ class AEDTPage(QWizardPage):
 
         detected_vars = []
         try:
-            oModule = oDesign.GetModule("DesignData")
-            var_names_list = oModule.GetVariableNames()
-            if hasattr(var_names_list, '__iter__'):
-                for vname in list(var_names_list):
-                    info = {"name": str(vname)}
-                    try:
-                        info["value"] = str(oModule.GetVariableValue(vname))
-                    except Exception:
-                        info["value"] = ""
-                    try:
-                        info["unit"] = str(oModule.GetVariableUnit(str(vname)))
-                    except Exception:
-                        info["unit"] = ""
-                    detected_vars.append(info)
+            oDesign.SetActiveDesign(design_name)
         except Exception:
-            pass
+            return
+
+        try:
+            var_names_list = oDesign.GetVariableNames()
+        except Exception:
+            try:
+                oModule = oDesign.GetModule("DesignProperties")
+                var_names_list = oModule.GetVariableNames()
+            except Exception:
+                var_names_list = []
+
+        if hasattr(var_names_list, '__iter__'):
+            for vname in list(var_names_list):
+                info = {"name": str(vname)}
+                try:
+                    info["value"] = str(oDesign.GetVariableValue(str(vname)))
+                except Exception:
+                    info["value"] = ""
+                detected_vars.append(info)
+
+        wizard = self.window()
+        wizard.setProperty("detected_variables", detected_vars)
 
         wizard = self.window()
         wizard.setProperty("detected_variables", detected_vars)
