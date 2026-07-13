@@ -131,14 +131,17 @@ if projects.Count > 0:
     oProject = None
 
     if proj_choice == -1:
-        default_aedt = os.environ.get("AEDT_PROJECT", "")
-        aedt_path = ask(
-            "AEDT 项目文件 (.aedt) 完整路径",
-            default_aedt if default_aedt else None
-        )
-        if not os.path.exists(aedt_path):
-            print(f"错误: 文件不存在: {aedt_path}")
-            sys.exit(1)
+    default_aedt = os.environ.get("AEDT_PROJECT", "")
+    aedt_path = ask(
+        "AEDT 项目文件 (.aedt) 路径 (支持相对路径，相对于项目根目录)",
+        default_aedt if default_aedt else None
+    )
+    if not os.path.isabs(aedt_path):
+        aedt_path = os.path.join(PROJECT_ROOT, aedt_path)
+    aedt_path = os.path.normpath(aedt_path)
+    if not os.path.exists(aedt_path):
+        print(f"错误: 文件不存在: {aedt_path}")
+        sys.exit(1)
 
         # 先关闭已打开的项目，避免 OpenProject 卡住
         for j in range(projects.Count):
@@ -156,9 +159,12 @@ if projects.Count > 0:
 else:
     default_aedt = os.environ.get("AEDT_PROJECT", "")
     aedt_path = ask(
-        "AEDT 项目文件 (.aedt) 完整路径",
+        "AEDT 项目文件 (.aedt) 路径 (支持相对路径，相对于项目根目录)",
         default_aedt if default_aedt else None
     )
+    if not os.path.isabs(aedt_path):
+        aedt_path = os.path.join(PROJECT_ROOT, aedt_path)
+    aedt_path = os.path.normpath(aedt_path)
     if not os.path.exists(aedt_path):
         print(f"错误: 文件不存在: {aedt_path}")
         sys.exit(1)
