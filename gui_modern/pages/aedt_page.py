@@ -192,24 +192,17 @@ class AEDTPage(QWidget):
             try:
                 oDesign = self._oProject.SetActiveDesign(self._design_name)
                 var_names_list = oDesign.GetVariableNames()
-            except Exception:
-                try:
-                    oDesign = self._oProject.SetActiveDesign(self._design_name)
-                    oModule = oDesign.GetModule("DesignProperties")
-                    var_names_list = oModule.GetVariableNames()
-                except Exception:
-                    var_names_list = []
-
-            if hasattr(var_names_list, '__iter__'):
-                for vname in list(var_names_list):
-                    info = {"name": str(vname)}
-                    try:
-                        info["value"] = str(oDesign.GetVariableValue(str(vname)))
-                    except Exception:
-                        info["value"] = ""
-                    detected_vars.append(info)
+                if hasattr(var_names_list, '__iter__') and not isinstance(var_names_list, str):
+                    for vname in list(var_names_list):
+                        name_str = str(vname).strip()
+                        if name_str:
+                            info = {"name": name_str, "value": "", "unit": ""}
+                            detected_vars.append(info)
+            except Exception as e:
+                print(f"[AEDT] GetVariableNames failed: {e}")
 
         self._detected_vars = detected_vars
+        print(f"[AEDT] Detected {len(detected_vars)} variables: {[v['name'] for v in detected_vars]}")
 
     def get_detected_variables(self):
         return getattr(self, '_detected_vars', [])
