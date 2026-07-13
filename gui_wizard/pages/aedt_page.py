@@ -154,8 +154,11 @@ class AEDTPage(QWizardPage):
             return
 
         detected_vars = []
+
+        # Try to get variables from design setup module (Maxwell specific)
         try:
-            var_names_list = oDesign.GetVariableNames()
+            oModule = oDesign.GetModule("AnalysisSetup")
+            var_names_list = oModule.GetVariableNames()
             if hasattr(var_names_list, '__iter__') and not isinstance(var_names_list, str):
                 for vname in list(var_names_list):
                     name_str = str(vname).strip()
@@ -163,7 +166,28 @@ class AEDTPage(QWizardPage):
                         info = {"name": name_str, "value": "", "unit": ""}
                         detected_vars.append(info)
         except Exception as e:
-            print(f"[AEDT] GetVariableNames failed: {e}")
+            print(f"[AEDT] AnalysisSetup.GetVariableNames failed: {e}")
+
+        # Fallback: try project-level variables
+        if not detected_vars:
+            try:
+                var_names_list = self._oProject.GetVariables()
+                if hasattr(var_names_list, '__iter__') and not isinstance(var_names_list, str):
+                    for vname in list(var_names_list):
+                        name_str = str(vname).strip()
+                        if name_str:
+                            info = {"name": name_str, "value": "", "unit": ""}
+                            detected_vars.append(info)
+            except Exception as e:
+                print(f"[AEDT] Project.GetVariables failed: {e}")
+
+        # Fallback: try to list available modules and their methods
+        if not detected_vars:
+            try:
+                module_names = oDesign.GetModuleNames()
+                print(f"[AEDT] Available modules: {list(module_names)}")
+            except Exception as e:
+                print(f"[AEDT] GetModuleNames failed: {e}")
 
         wizard = self.window()
         wizard.setProperty("detected_variables", detected_vars)
