@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QComboBox,
 )
 
 
@@ -34,6 +35,14 @@ class AEDTPage(QWizardPage):
         status_layout.addWidget(self.connect_btn)
         layout.addLayout(status_layout)
 
+        instance_layout = QHBoxLayout()
+        instance_layout.addWidget(QLabel("实例选择:"))
+        self.instance_combo = QComboBox()
+        self.instance_combo.setVisible(False)
+        self.instance_combo.currentIndexChanged.connect(self._on_instance_selected)
+        instance_layout.addWidget(self.instance_combo, 1)
+        layout.addLayout(instance_layout)
+
         layout.addWidget(QLabel("已打开的项目:"))
         self.project_list = QListWidget()
         self.project_list.currentRowChanged.connect(self._on_project_selected)
@@ -52,67 +61,64 @@ class AEDTPage(QWizardPage):
         self.window().setProperty("aedt_connected", False)
 
         try:
-            from win32com.client import Dispatch
-
-            prog_ids = [
-                "Ansoft.ElectronicsDesktop.2021.1",
-                "Ansoft.ElectronicsDesktop.2022.1",
-                "Ansoft.ElectronicsDesktop.2023.1",
-                "Ansoft.ElectronicsDesktop.2024.1",
-                "Ansoft.ElectronicsDesktop.2025.1",
-            ]
-
-            for prog_id in prog_ids:
-                try:
-                    oApp = Dispatch(prog_id)
-                    oDesktop = oApp.GetAppDesktop()
-                    version = oDesktop.GetVersion()
-                    self._oApp = oApp
-                    self._oDesktop = oDesktop
-                    self.status_label.setText(f"已连接 AEDT v{version}")
-                    self.status_label.setStyleSheet("color: green;")
-                    self.window().setProperty("aedt_connected", True)
-                    self._populate_projects()
-                    self.connect_btn.setEnabled(True)
-                    return
-                except Exception:
-                    continue
-
+            from huds_app.utils.aedt_instances import enumerate_aedt_instances
             from huds_app.interface.maxwell_sweep import ensure_aedt_running
 
-            self.status_label.setText("AEDT 未运行，正在自动启动...")
-            try:
-                ensure_aedt_running()
-            except FileNotFoundError as e:
-                QMessageBox.critical(self, "错误", str(e))
-                self.status_label.setText("启动失败")
+            instances = enumerate_aedt_instances()
+
+            if not instances:
+                self.status_label.setText("AEDT 未运行，正在自动启动...")
+                try:
+                    ensure_aedt_running()
+                except FileNotFoundError as e:
+                    QMessageBox.critical(self, "错误", str(e))
+                    self.status_label.setText("启动失败")
+                    self.status_label.setStyleSheet("color: red;")
+                    self.connect_btn.setEnabled(True)
+                    return
+                instances = enumerate_aedt_instances()
+
+            if not instances:
+                self.status_label.setText("连接失败，请手动启动 AEDT 后重试")
                 self.status_label.setStyleSheet("color: red;")
                 self.connect_btn.setEnabled(True)
                 return
 
-            for prog_id in prog_ids:
-                try:
-                    oApp = Dispatch(prog_id)
-                    oDesktop = oApp.GetAppDesktop()
-                    version = oDesktop.GetVersion()
-                    self._oApp = oApp
-                    self._oDesktop = oDesktop
-                    self.status_label.setText(f"已连接 AEDT v{version}")
-                    self.status_label.setStyleSheet("color: green;")
-                    self.window().setProperty("aedt_connected", True)
-                    self._populate_projects()
-                    self.connect_btn.setEnabled(True)
-                    return
-                except Exception:
-                    continue
+            if len(instances) == 1:
+                self._oApp = instances[0]['oApp']
+                self._oDesktop = instances[0]['oDesktop']
+                self.instance_combo.setVisible(False)
+            else:
+                self.instance_combo.clear()
+                for inst in instances:
+                    self.instance_combo.addItem(inst['label'])
+                self.instance_combo.setVisible(True)
+                self._on_instance_selected(0)
+                return
 
-            self.status_label.setText("连接失败，请手动启动 AEDT 后重试")
-            self.status_label.setStyleSheet("color: red;")
+            version = self._oDesktop.GetVersion()
+            self.status_label.setText(f"已连接 AEDT v{version}")
+            self.status_label.setStyleSheet("color: green;")
+            self.window().setProperty("aedt_connected", True)
+            self._populate_projects()
             self.connect_btn.setEnabled(True)
 
         except Exception as e:
             self.status_label.setText(f"错误: {e}")
             self.status_label.setStyleSheet("color: red;")
+            self.connect_btn.setEnabled(True)
+
+    def _on_instance_selected(self, index):
+        from huds_app.utils.aedt_instances import enumerate_aedt_instances
+        instances = enumerate_aedt_instances()
+        if 0 <= index < len(instances):
+            self._oApp = instances[index]['oApp']
+            self._oDesktop = instances[index]['oDesktop']
+            version = instances[index]['version']
+            self.status_label.setText(f"已连接 AEDT v{version}")
+            self.status_label.setStyleSheet("color: green;")
+            self.window().setProperty("aedt_connected", True)
+            self._populate_projects()
             self.connect_btn.setEnabled(True)
 
     def _populate_projects(self):

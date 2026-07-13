@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QLineEdit,
     QPushButton,
+    QComboBox,
 )
 
 
@@ -33,6 +34,14 @@ class AEDTPage(QWidget):
         connect_btn.setFixedHeight(48)
         connect_btn.clicked.connect(self._connect_aedt)
         layout.addWidget(connect_btn)
+
+        instance_layout = QHBoxLayout()
+        instance_layout.addWidget(QLabel("Instance:"))
+        self.instance_combo = QComboBox()
+        self.instance_combo.setVisible(False)
+        self.instance_combo.currentIndexChanged.connect(self._on_instance_selected)
+        instance_layout.addWidget(self.instance_combo, 1)
+        layout.addLayout(instance_layout)
 
         self.status_label = QLabel("Not connected")
         self.status_label.setStyleSheet("color: #888; font-size: 13px; padding: 8px 0;")
@@ -69,51 +78,53 @@ class AEDTPage(QWidget):
 
     def _connect_aedt(self):
         try:
-            from win32com.client import Dispatch
+            from huds_app.utils.aedt_instances import enumerate_aedt_instances
             from huds_app.interface.maxwell_sweep import ensure_aedt_running
 
             self.status_label.setText("Connecting...")
 
-            prog_ids = [
-                "Ansoft.ElectronicsDesktop.2025.1",
-                "Ansoft.ElectronicsDesktop.2024.1",
-                "Ansoft.ElectronicsDesktop.2023.1",
-                "Ansoft.ElectronicsDesktop.2022.1",
-                "Ansoft.ElectronicsDesktop.2021.1",
-            ]
+            instances = enumerate_aedt_instances()
 
-            for prog_id in prog_ids:
-                try:
-                    self._oApp = Dispatch(prog_id)
-                    self._oDesktop = self._oApp.GetAppDesktop()
-                    version = self._oDesktop.GetVersion()
-                    self.status_label.setText(f"Connected - AEDT {version}")
-                    self.status_label.setStyleSheet("color: #4caf50; font-size: 13px; padding: 8px 0;")
-                    self._refresh_projects()
-                    return
-                except Exception:
-                    continue
+            if not instances:
+                ensure_aedt_running()
+                instances = enumerate_aedt_instances()
 
-            ensure_aedt_running()
+            if not instances:
+                self.status_label.setText("Failed to connect to AEDT")
+                self.status_label.setStyleSheet("color: #f44336; font-size: 13px; padding: 8px 0;")
+                return
 
-            for prog_id in prog_ids:
-                try:
-                    self._oApp = Dispatch(prog_id)
-                    self._oDesktop = self._oApp.GetAppDesktop()
-                    version = self._oDesktop.GetVersion()
-                    self.status_label.setText(f"Connected - AEDT {version}")
-                    self.status_label.setStyleSheet("color: #4caf50; font-size: 13px; padding: 8px 0;")
-                    self._refresh_projects()
-                    return
-                except Exception:
-                    continue
+            if len(instances) == 1:
+                self._oApp = instances[0]['oApp']
+                self._oDesktop = instances[0]['oDesktop']
+                self.instance_combo.setVisible(False)
+            else:
+                self.instance_combo.clear()
+                for inst in instances:
+                    self.instance_combo.addItem(inst['label'])
+                self.instance_combo.setVisible(True)
+                self._on_instance_selected(0)
+                return
 
-            self.status_label.setText("Failed to connect to AEDT")
-            self.status_label.setStyleSheet("color: #f44336; font-size: 13px; padding: 8px 0;")
+            version = self._oDesktop.GetVersion()
+            self.status_label.setText(f"Connected - AEDT {version}")
+            self.status_label.setStyleSheet("color: #4caf50; font-size: 13px; padding: 8px 0;")
+            self._refresh_projects()
 
         except Exception as e:
             self.status_label.setText(f"Error: {e}")
             self.status_label.setStyleSheet("color: #f44336; font-size: 13px; padding: 8px 0;")
+
+    def _on_instance_selected(self, index):
+        from huds_app.utils.aedt_instances import enumerate_aedt_instances
+        instances = enumerate_aedt_instances()
+        if 0 <= index < len(instances):
+            self._oApp = instances[index]['oApp']
+            self._oDesktop = instances[index]['oDesktop']
+            version = instances[index]['version']
+            self.status_label.setText(f"Connected - AEDT {version}")
+            self.status_label.setStyleSheet("color: #4caf50; font-size: 13px; padding: 8px 0;")
+            self._refresh_projects()
 
     def _refresh_projects(self):
         self.project_list.clear()

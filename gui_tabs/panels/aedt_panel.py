@@ -42,6 +42,14 @@ class AEDTPanel(QFrame):
         layout.addWidget(self.connect_btn, row, 0, 1, 3)
         row += 1
 
+        # Instance selector
+        layout.addWidget(QLabel("Instance:"), row, 0)
+        self.instance_combo = QComboBox()
+        self.instance_combo.setVisible(False)
+        self.instance_combo.currentIndexChanged.connect(self._on_instance_changed)
+        layout.addWidget(self.instance_combo, row, 1, 1, 2)
+        row += 1
+
         # Project selector
         layout.addWidget(QLabel("Project:"), row, 0)
         self.project_combo = QComboBox()
@@ -61,37 +69,29 @@ class AEDTPanel(QFrame):
 
     def _on_connect(self):
         try:
-            from win32com.client import Dispatch
+            from huds_app.utils.aedt_instances import enumerate_aedt_instances
             from huds_app.interface.maxwell_sweep import ensure_aedt_running
 
-            prog_ids = [
-                "Ansoft.ElectronicsDesktop.2025.1",
-                "Ansoft.ElectronicsDesktop.2024.1",
-                "Ansoft.ElectronicsDesktop.2023.1",
-                "Ansoft.ElectronicsDesktop.2022.1",
-                "Ansoft.ElectronicsDesktop.2021.1",
-            ]
+            instances = enumerate_aedt_instances()
 
-            for prog_id in prog_ids:
-                try:
-                    self.oApp = Dispatch(prog_id)
-                    self.oDesktop = self.oApp.GetAppDesktop()
-                    break
-                except Exception:
-                    continue
-
-            if not self.oDesktop:
+            if not instances:
                 ensure_aedt_running()
-                for prog_id in prog_ids:
-                    try:
-                        self.oApp = Dispatch(prog_id)
-                        self.oDesktop = self.oApp.GetAppDesktop()
-                        break
-                    except Exception:
-                        continue
+                instances = enumerate_aedt_instances()
 
-            if not self.oDesktop:
+            if not instances:
                 self.status_label.setText("Failed to connect AEDT")
+                return
+
+            if len(instances) == 1:
+                self.oApp = instances[0]['oApp']
+                self.oDesktop = instances[0]['oDesktop']
+                self.instance_combo.setVisible(False)
+            else:
+                self.instance_combo.clear()
+                for inst in instances:
+                    self.instance_combo.addItem(inst['label'])
+                self.instance_combo.setVisible(True)
+                self._on_instance_changed(0)
                 return
 
             version = self.oDesktop.GetVersion()
@@ -114,6 +114,30 @@ class AEDTPanel(QFrame):
         except Exception as e:
             self.status_label.setText(f"Connection error: {e}")
             self.status_label.setStyleSheet("color: red;")
+
+    def _on_instance_changed(self, index):
+        from huds_app.utils.aedt_instances import enumerate_aedt_instances
+        instances = enumerate_aedt_instances()
+        if 0 <= index < len(instances):
+            self.oApp = instances[index]['oApp']
+            self.oDesktop = instances[index]['oDesktop']
+            version = instances[index]['version']
+            self.status_label.setText(f"Connected (AEDT {version})")
+            self.status_label.setStyleSheet("color: green;")
+            self.project_combo.setEnabled(True)
+            self.design_combo.setEnabled(True)
+
+            projects = self.oDesktop.GetProjects()
+            self.project_combo.clear()
+            for i in range(projects.Count):
+                name = projects(i).GetName()
+                try:
+                    path = projects(i).GetPath()
+                except Exception:
+                    path = "Unknown"
+                self.project_combo.addItem(f"{name} ({path})")
+
+            self._signals.connected.emit()
 
     def _on_project_changed(self, index):
         if index < 0 or not self.oDesktop:

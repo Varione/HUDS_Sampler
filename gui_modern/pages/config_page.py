@@ -183,11 +183,9 @@ class ConfigPage(QWidget):
             self.var_table.setItem(i, 2, default_item)
 
             min_item = QTableWidgetItem(var.get("min", ""))
-            min_item.setFlags(min_item.flags() & ~Qt.ItemIsEditable)
             self.var_table.setItem(i, 3, min_item)
 
             max_item = QTableWidgetItem(var.get("max", ""))
-            max_item.setFlags(max_item.flags() & ~Qt.ItemIsEditable)
             self.var_table.setItem(i, 4, max_item)
 
             _, unit = parse_value_with_unit(var.get('min', ''))
