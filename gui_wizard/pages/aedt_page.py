@@ -153,6 +153,22 @@ class AEDTPage(QWizardPage):
             print(f"[AEDT] SetActiveDesign failed: {e}")
             return
 
+        # Auto-detect variables from .aedt file
+        try:
+            aedt_path = self._oProject.GetPath()
+        except Exception:
+            aedt_path = None
+        
+        if aedt_path:
+            from huds_app.utils.aedt_parser import parse_aedt_variables
+            vars = parse_aedt_variables(aedt_path, design_name)
+            if vars:
+                wizard = self.window()
+                wizard.setProperty("detected_variables", vars)
+                print(f"[AEDT] Detected {len(vars)} variables for design '{design_name}':")
+                for v in vars:
+                    print(f"  {v['name']}: default={v.get('default', 'N/A')}, min={v.get('min', 'N/A')}, max={v.get('max', 'N/A')}")
+
     def initializePage(self):
         config = self.window().property("config")
         if config and config.get("aedt_project_path"):

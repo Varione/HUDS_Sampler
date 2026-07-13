@@ -9,6 +9,9 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QComboBox,
     QGroupBox,
+    QPushButton,
+    QListWidget,
+    QListWidgetItem,
 )
 
 
@@ -26,29 +29,45 @@ class ConfigPage(QWizardPage):
         var_group = QGroupBox("扫参变量")
         var_layout = QVBoxLayout()
 
+        auto_row = QHBoxLayout()
+        auto_row.addWidget(QLabel("已检测到的设计变量:"))
+        self.auto_detect_btn = QPushButton("自动填充")
+        self.auto_detect_btn.clicked.connect(self._auto_fill_variables)
+        auto_row.addWidget(self.auto_detect_btn)
+        var_layout.addLayout(auto_row)
+
+        self.var_list = QListWidget()
+        var_layout.addWidget(self.var_list)
+
+        manual_group = QGroupBox("手动覆盖 (可选)")
+        manual_layout = QVBoxLayout()
+
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("变量名:"))
-        self.var_names_edit = QLineEdit("v")
+        self.var_names_edit = QLineEdit("")
         row1.addWidget(self.var_names_edit, 1)
-        var_layout.addLayout(row1)
+        manual_layout.addLayout(row1)
 
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("最小值:"))
-        self.var_mins_edit = QLineEdit("100")
+        self.var_mins_edit = QLineEdit("")
         row2.addWidget(self.var_mins_edit, 1)
-        var_layout.addLayout(row2)
+        manual_layout.addLayout(row2)
 
         row3 = QHBoxLayout()
         row3.addWidget(QLabel("最大值:"))
-        self.var_maxs_edit = QLineEdit("500")
+        self.var_maxs_edit = QLineEdit("")
         row3.addWidget(self.var_maxs_edit, 1)
-        var_layout.addLayout(row3)
+        manual_layout.addLayout(row3)
 
         row4 = QHBoxLayout()
         row4.addWidget(QLabel("单位:"))
-        self.var_units_edit = QLineEdit("km_per_hour")
+        self.var_units_edit = QLineEdit("")
         row4.addWidget(self.var_units_edit, 1)
-        var_layout.addLayout(row4)
+        manual_layout.addLayout(row4)
+
+        manual_group.setLayout(manual_layout)
+        layout.addWidget(manual_group)
 
         var_group.setLayout(var_layout)
         layout.addWidget(var_group)
@@ -128,25 +147,79 @@ class ConfigPage(QWizardPage):
         layout.addWidget(train_group)
         layout.addStretch()
 
+    def _auto_fill_variables(self):
+        detected = self.window().property("detected_variables") or []
+        if not detected:
+            return
+        
+        from huds_app.utils.aedt_parser import parse_value_with_unit
+        self.var_list.clear()
+        for v in detected:
+            num_val, unit = parse_value_with_unit(v.get('default', ''))
+            min_val = v.get('min', '')
+            max_val = v.get('max', '')
+            min_num, _ = parse_value_with_unit(min_val)
+            max_num, _ = parse_value_with_unit(max_val)
+            
+            display = f"{v['name']} = {v.get('default', 'N/A')}"
+            if min_val and max_val:
+                display += f"  [{min_val} ~ {max_val}]"
+            item = QListWidgetItem(display)
+            item.setData(1, v)
+            self.var_list.addItem(item)
+    
+    def initializePage(self):
+        detected = self.window().property("detected_variables") or []
+        if detected:
+            self._auto_fill_variables()
+    
     def validatePage(self):
+        from huds_app.utils.aedt_parser import parse_value_with_unit
+        
+        # Collect variables from list (auto-detected) and manual override
+        variables = []
+        
+        # First, add auto-detected variables that have min/max
+        for i in range(self.var_list.count()):
+            item = self.var_list.item(i)
+            v = item.data(1)
+            if not v:
+                continue
+            
+            num_val, unit = parse_value_with_unit(v.get('default', ''))
+            min_num, _ = parse_value_with_unit(v.get('min', ''))
+            max_num, _ = parse_value_with_unit(v.get('max', ''))
+            
+            # Only include variables that have optimization bounds
+            if min_num is not None and max_num is not None:
+                variables.append({
+                    "name": v['name'],
+                    "min": float(min_num),
+                    "max": float(max_num),
+                    "sample_points": 60,
+                    "unit": unit,
+                })
+        
+        # Then add manually specified variables
         var_names = [x.strip() for x in self.var_names_edit.text().split(",") if x.strip()]
         var_mins = [float(x.strip()) for x in self.var_mins_edit.text().split(",") if x.strip()]
         var_maxs = [float(x.strip()) for x in self.var_maxs_edit.text().split(",") if x.strip()]
         var_units_raw = self.var_units_edit.text()
         var_units = [x.strip() for x in var_units_raw.split(",") if x.strip()]
-
+        
         while len(var_units) < len(var_names):
             var_units.append("")
-
-        variables = []
+        
+        existing_names = {v['name'] for v in variables}
         for i, name in enumerate(var_names):
-            variables.append({
-                "name": name,
-                "min": var_mins[i] if i < len(var_mins) else 0.0,
-                "max": var_maxs[i] if i < len(var_maxs) else 1.0,
-                "sample_points": 60,
-                "unit": var_units[i] if i < len(var_units) else "",
-            })
+            if name not in existing_names:
+                variables.append({
+                    "name": name,
+                    "min": var_mins[i] if i < len(var_mins) else 0.0,
+                    "max": var_maxs[i] if i < len(var_maxs) else 1.0,
+                    "sample_points": 60,
+                    "unit": var_units[i] if i < len(var_units) else "",
+                })
 
         output_names = [x.strip() for x in self.output_names_edit.text().split(",") if x.strip()]
 
