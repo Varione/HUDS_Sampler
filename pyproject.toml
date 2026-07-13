@@ -3,24 +3,20 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "huds-active-learning-app"
+name = "huds-active-learning"
 version = "0.1.0"
-description = "HUDS active-learning workflow for surrogate model training."
+description = "HUDS active learning for surrogate model training"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "numpy",
   "pandas",
   "torch",
-  "scikit-learn"
+  "scikit-learn",
 ]
 
 [project.optional-dependencies]
 fast = ["faiss-cpu"]
-test = ["pytest"]
-
-[project.scripts]
-huds-app = "huds_app.interface.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["huds_app*"]

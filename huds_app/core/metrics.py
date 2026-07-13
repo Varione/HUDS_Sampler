@@ -2,46 +2,32 @@ import numpy as np
 
 
 def r2_score(y_true, y_pred):
-    y_true = np.asarray(y_true, dtype=float)
-    y_pred = np.asarray(y_pred, dtype=float)
-
-    residual_sum_squares = np.sum((y_true - y_pred) ** 2)
-    total_sum_squares = np.sum((y_true - np.mean(y_true, axis=0)) ** 2)
-
-    if total_sum_squares == 0:
-        return 0.0
-
-    return float(1.0 - residual_sum_squares / total_sum_squares)
+    if len(y_true) < 3:
+        return float("nan")
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    if ss_tot == 0:
+        return float("nan")
+    return float(1 - ss_res / ss_tot)
 
 
 def rmse(y_true, y_pred):
-    y_true = np.asarray(y_true, dtype=float)
-    y_pred = np.asarray(y_pred, dtype=float)
-
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
 
-def compute_metrics(y_true, y_pred, output_names):
-    y_true = np.asarray(y_true, dtype=float)
-    y_pred = np.asarray(y_pred, dtype=float)
+def mean_predictive_variance(pred_mean, pred_var):
+    return float(np.mean(pred_var))
 
+
+def compute_metrics(y_true, y_pred, output_names=None):
+    n_outputs = y_true.shape[1] if y_true.ndim > 1 else 1
     metrics = {}
-    r2_values = []
+    for i in range(n_outputs):
+        name = output_names[i] if output_names else f"output_{i}"
+        metrics[f"r2_{name}"] = r2_score(y_true[:, i], y_pred[:, i])
+        metrics[f"rmse_{name}"] = rmse(y_true[:, i], y_pred[:, i])
 
-    for output_index, output_name in enumerate(output_names):
-        output_true = y_true[:, output_index]
-        output_pred = y_pred[:, output_index]
-
-        output_r2 = r2_score(output_true, output_pred)
-        metrics[f"r2_{output_name}"] = output_r2
-        metrics[f"rmse_{output_name}"] = rmse(output_true, output_pred)
-        r2_values.append(output_r2)
-
-    metrics["r2_avg"] = float(np.mean(r2_values)) if r2_values else 0.0
+    r2_vals = [metrics.get(f"r2_{n}", 0) for n in (output_names or [f"output_{i}" for i in range(n_outputs)])]
+    valid_r2 = [v for v in r2_vals if not np.isnan(v)]
+    metrics["r2_avg"] = float(np.mean(valid_r2)) if valid_r2 else 0.0
     return metrics
-
-
-def mean_predictive_variance(predictions):
-    predictions = np.asarray(predictions, dtype=float)
-
-    return np.mean(np.var(predictions, axis=0), axis=1)

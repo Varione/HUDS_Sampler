@@ -30,7 +30,9 @@ def init_run(config_path: str | Path, run_dir: str | Path, snap_to_levels: bool 
     config = load_config(str(config_path))
     run_path = ensure_run_dir(str(run_dir))
 
-    shutil.copy2(config_path, run_path / "config.json")
+    dst = run_path / "config.json"
+    if Path(config_path).resolve() != dst.resolve():
+        shutil.copy2(config_path, dst)
 
     pool_df = create_candidate_pool(config, snap_to_levels=snap_to_levels)
     save_pool_files(pool_df, run_path)
@@ -360,7 +362,7 @@ def _load_model_for_inference(run_dir: str | Path, config: Any) -> tuple[Any, to
     model = build_model(config).to(device)
 
     try:
-        checkpoint_data = torch.load(checkpoint_path, map_location=device)
+        checkpoint_data = torch.load(checkpoint_path, map_location=device, weights_only=False)
         state_dict = checkpoint_data.get("model_state_dict", checkpoint_data.get("state_dict"))
         if state_dict is None:
             raise ValueError(f"Checkpoint {checkpoint_path} has no model state dict")
@@ -368,7 +370,7 @@ def _load_model_for_inference(run_dir: str | Path, config: Any) -> tuple[Any, to
     except RuntimeError as e:
         print(f"Warning: strict checkpoint load failed ({e}), attempting non-strict load...")
         try:
-            checkpoint_data = torch.load(checkpoint_path, map_location=device)
+            checkpoint_data = torch.load(checkpoint_path, map_location=device, weights_only=False)
             state_dict = checkpoint_data.get("model_state_dict", checkpoint_data.get("state_dict"))
             if state_dict is None:
                 raise ValueError(f"Checkpoint {checkpoint_path} has no model state dict")

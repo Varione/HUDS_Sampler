@@ -211,42 +211,49 @@ def train_step(
         if latest_path is not None:
             _save_checkpoint(model, optimizer, epoch_metrics, Path(latest_path))
 
+        current_r2 = float(val_metrics.get("r2_avg", 0.0))
+        r2_valid = not np.isnan(current_r2)
+
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_val_r2 = float(val_metrics.get("r2_avg", 0.0))
+            if r2_valid:
+                best_val_r2 = current_r2
             epochs_without_improvement = 0
             best_metrics = epoch_metrics.copy()
             best_path = getattr(config, "best_checkpoint_path", None)
             if best_path is not None:
                 _save_checkpoint(model, optimizer, epoch_metrics, Path(best_path))
         else:
-            current_r2 = float(val_metrics.get("r2_avg", 0.0))
-            # FIX 19: Only count as no-improvement when both loss and R² are not improving
-            r2_regressed = current_r2 < best_val_r2 - 0.005
-            if r2_regressed:
+            if r2_valid:
+                r2_regressed = current_r2 < best_val_r2 - 0.005
+                if r2_regressed:
+                    epochs_without_improvement += 1
+                elif current_r2 >= best_val_r2:
+                    best_val_r2 = current_r2
+                    best_path = getattr(config, "best_checkpoint_path", None)
+                    if best_path is not None:
+                        _save_checkpoint(model, optimizer, epoch_metrics, Path(best_path))
+            else:
                 epochs_without_improvement += 1
-            elif current_r2 >= best_val_r2:
-                # R² improved but loss didn't → update R² and save checkpoint
-                best_val_r2 = current_r2
-                best_path = getattr(config, "best_checkpoint_path", None)
-                if best_path is not None:
-                    _save_checkpoint(model, optimizer, epoch_metrics, Path(best_path))
+
             if epochs_without_improvement >= config.training.patience:
+                r2_str = f"{current_r2:.4f}" if r2_valid else "N/A"
                 if progress_cb is not None:
                     progress_cb(
                         f"Early stopping at epoch {epoch}/{config.training.epochs_per_step} "
-                        f"(val_loss={val_loss:.6f}, val_r2={current_r2:.4f})",
+                        f"(val_loss={val_loss:.6f}, val_r2={r2_str})",
                         100,
                     )
                 break
 
         if progress_cb is not None:
             percent = int(epoch / max(1, config.training.epochs_per_step) * 100)
+            r2_str = f"{current_r2:.4f}" if r2_valid else "N/A"
             progress_cb(
                 (
                     f"Epoch {epoch}/{config.training.epochs_per_step} | "
                     f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}, "
-                    f"R2={float(val_metrics.get('r2_avg', 0.0)):.4f}"
+                    f"R2={r2_str}"
                 ),
                 min(100, max(0, percent)),
             )
@@ -267,7 +274,17 @@ def train_model(run_dir: str | Path, config: Any, progress_cb: Any | None = None
     artifacts_dir = run_path / "artifacts"
 
     train_df = read_csv(datasets_dir / "train_labeled.csv")
-    val_df = read_csv(datasets_dir / "val_labeled.csv")
+
+    val_path = datasets_dir / "val_labeled.csv"
+    if val_path.exists():
+        val_df = read_csv(val_path)
+    else:
+        # Fallback: use a random subset of train data for validation
+        rng = np.random.RandomState(config.random_seed)
+        n_val = max(1, int(len(train_df) * 0.2))
+        val_idx = rng.choice(len(train_df), size=n_val, replace=False)
+        val_df = train_df.iloc[val_idx].copy()
+        print(f"  Warning: val_labeled.csv not found, using {n_val} train samples as validation")
     var_cols = [variable.name for variable in config.variables]
     out_cols = list(config.model.output_names)
     _validate_columns(train_df, var_cols + out_cols, datasets_dir / "train_labeled.csv")
@@ -310,7 +327,7 @@ def train_model(run_dir: str | Path, config: Any, progress_cb: Any | None = None
     if not getattr(config.training, 'retrain_from_scratch', False) and checkpoint_latest.exists():
         print(f"Loading existing checkpoint from {checkpoint_latest}")
         try:
-            checkpoint_data = torch.load(checkpoint_latest, map_location=device)
+            checkpoint_data = torch.load(checkpoint_latest, map_location=device, weights_only=False)
             model.load_state_dict(checkpoint_data["model_state_dict"])
 
             # P2-Fix D: Optionally restore optimizer state for continuous training momentum

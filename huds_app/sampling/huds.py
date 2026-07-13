@@ -302,9 +302,17 @@ def _split_selected_ids(selected_ids: list[str], config: AppConfig) -> dict[str,
     indices = list(range(n))
     random.Random(config.random_seed).shuffle(indices)
 
-    n_train = max(1, int(n * config.split.train_split))
-    n_val = max(0, int(n * config.split.val_split))
-    # Remaining go to test
+    # Guarantee at least 1 sample per split when possible
+    if n >= 3:
+        n_train = max(1, int(n * config.split.train_split))
+        n_val = max(1, int(n * config.split.val_split))
+    elif n == 2:
+        n_train = 1
+        n_val = 1
+    else:
+        n_train = 1
+        n_val = 0
+
     n_test = n - n_train - n_val
 
     split_indices = indices[:n_train]
@@ -350,13 +358,26 @@ def run_huds_sampling(run_dir, config, step):
     candidate_pool_df = read_csv(candidate_pool_path)
     all_labeled_df = _aggregate_labeled(run_path)
 
+    # Step 0: no checkpoint or normalization yet - use raw pool and skip model loading
+    is_initial_step = (state.trained_step == -1 and state.current_step == 0)
     checkpoint_path = _latest_checkpoint_path(run_path, state)
-    normalized_pool_df = _normalize_pool_for_model(candidate_pool_df, run_path, variable_columns)
+
+    if is_initial_step:
+        var_map = {v.name: v for v in app_config.variables}
+        normalized_pool_df = candidate_pool_df[variable_columns + [SAMPLE_ID_COLUMN]].copy()
+        for col in variable_columns:
+            vmin = float(var_map[col].min)
+            vmax = float(var_map[col].max)
+            normalized_pool_df[col] = (candidate_pool_df[col] - vmin) / (vmax - vmin + 1e-8)
+    else:
+        normalized_pool_df = _normalize_pool_for_model(candidate_pool_df, run_path, variable_columns)
+
     unlabeled_mask = _build_unlabeled_mask(candidate_pool_df, all_labeled_df, state)
 
     device_obj = resolve_device(app_config.training.device)
     model = build_model(app_config).to(device_obj)
-    _load_checkpoint_weights(model, checkpoint_path, device_obj)
+    if not is_initial_step and checkpoint_path.exists():
+        _load_checkpoint_weights(model, checkpoint_path, device_obj)
 
     result = select_huds(
         model=model,
@@ -371,11 +392,12 @@ def run_huds_sampling(run_dir, config, step):
 
     selected_ids = result["selected_ids"]
     split_assignment = result.pop("split_assignment")
-    request_df = candidate_pool_df[candidate_pool_df[SAMPLE_ID_COLUMN].isin(selected_ids)].copy()
-    request_df = _order_request_rows(request_df, selected_ids)
+    selected_ids_str = [str(sid) for sid in selected_ids]
+    request_df = candidate_pool_df[candidate_pool_df[SAMPLE_ID_COLUMN].isin(selected_ids_str)].copy()
+    request_df = _order_request_rows(request_df, selected_ids_str)
 
     # Add split assignment column to request CSV for import_labels routing
-    split_map = {sid: split_type for split_type, sids in split_assignment.items() for sid in sids}
+    split_map = {str(sid): split_type for split_type, sids in split_assignment.items() for sid in sids}
     request_df[SPLIT_ASSIGNMENT_COLUMN] = request_df[SAMPLE_ID_COLUMN].map(split_map)
 
     request_path = run_path / "requests" / f"train_step_{int(step):03d}_request.csv"
@@ -432,21 +454,24 @@ def _validate_sampling_step(state, config, step):
     if has_pending_train:
         raise ValueError("cannot sample a new step while previous training requests are still pending labels")
 
-    # FIX 04: Enhanced trained_step validation with better diagnostics
+    # FIX 04: Allow first step (step 1) when no model exists yet - it will be random sampling
     if int(state.trained_step) < int(state.current_step):
-        msg = (
-            f"Cannot sample step {requested_step}: current step {state.current_step} "
-            f"has not been trained (trained_step={state.trained_step}). "
-            f"Run 'huds-app train --run {state.run_dir}' first."
-        )
-        if state.pending_sample_ids:
-            import logging
-            logging.warning(
-                f"trained_step ({state.trained_step}) < current_step ({state.current_step}), "
-                f"but there are {len(state.pending_sample_ids)} pending sample IDs. "
-                f"This may indicate a prior training failure."
+        if requested_step == 1 and state.trained_step == -1 and state.current_step == 0:
+            pass  # Allow initial random sampling
+        else:
+            msg = (
+                f"Cannot sample step {requested_step}: current step {state.current_step} "
+                f"has not been trained (trained_step={state.trained_step}). "
+                f"Run 'huds-app train --run {state.run_dir}' first."
             )
-        raise ValueError(msg)
+            if state.pending_sample_ids:
+                import logging
+                logging.warning(
+                    f"trained_step ({state.trained_step}) < current_step ({state.current_step}), "
+                    f"but there are {len(state.pending_sample_ids)} pending sample IDs. "
+                    f"This may indicate a prior training failure."
+                )
+            raise ValueError(msg)
 
 
 def _validate_selection_inputs(train_pool_df, var_cols):
@@ -607,9 +632,7 @@ def _latest_checkpoint_path(run_path: Path, state: RunState):
         checkpoint_path = run_path / checkpoint_path
     if not checkpoint_path.exists():
         checkpoint_path = run_path / "checkpoints" / "model_latest.pt"
-    if not checkpoint_path.exists():
-        raise FileNotFoundError(f"Model checkpoint not found: {checkpoint_path}")
-    return checkpoint_path
+    return checkpoint_path  # May not exist on step 0 - caller handles it
 
 
 def _normalize_pool_for_model(train_pool_df, run_path, variable_columns):
@@ -669,7 +692,7 @@ def _load_checkpoint_weights(model, checkpoint_path, device):
     FIX 7: Try strict=True first, fall back to strict=False with diagnostic logging.
     Default is now strict loading; partial loads are only used as a last resort.
     """
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     if isinstance(checkpoint, dict):
         state_dict = (
             checkpoint.get("model_state_dict")

@@ -304,6 +304,7 @@ class AppConfig:
     validation: ValidationConfig = field(default_factory=lambda: ValidationConfig())
     training: TrainingConfig = field(default_factory=lambda: TrainingConfig())
     huds: HUDSConfig = field(default_factory=lambda: HUDSConfig())
+    steady_state_pct: float = 0.2
 
 
 def _from_dict(cls, data: dict):
@@ -353,6 +354,7 @@ def load_config(path: str) -> AppConfig:
         validation=_from_dict(ValidationConfig, raw.get("validation", {})),
         training=_from_dict(TrainingConfig, raw.get("training", {})),
         huds=_from_dict(HUDSConfig, raw.get("huds", {})),
+        steady_state_pct=raw.get("steady_state_pct", 0.2),
     )
 
     validate_config(config)
