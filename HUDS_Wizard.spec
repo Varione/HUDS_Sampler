@@ -4,8 +4,8 @@ block_cipher = None
 
 import os
 import sys
-# Use parent of script path (spec file location)
-SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+# Spec file is in project root - hardcoded for PyInstaller compat
+SRC_DIR = r'E:\大型数据库构建\HUDS'
 
 a = Analysis(
     [os.path.join(SRC_DIR, 'gui_wizard', 'main.py')],
