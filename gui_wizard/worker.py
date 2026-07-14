@@ -38,7 +38,7 @@ class HUDSWorker(QThread):
     def run(self):
         from huds_app.sampling.huds import run_huds_sampling
         from huds_app.data.validation import import_labels as il
-        from huds_app.model.train import train_model
+        from huds_app.model.train import train_model, TrainingAborted
         from huds_app.interface.workflow import init_run, show_status
 
         config_path = os.path.join(self.run_dir, "config.json")
@@ -133,7 +133,11 @@ class HUDSWorker(QThread):
                     last_print_pct[0] = percent
 
             try:
-                metrics = train_model(self.run_dir, cfg, progress_cb=progress_cb)
+                metrics = train_model(self.run_dir, cfg, progress_cb=progress_cb, cancel_cb=lambda: self.abort)
+            except TrainingAborted:
+                self.log("  训练已被用户中止")
+                self.finished_signal.emit(False, "训练已被用户中止")
+                return
             except Exception as e:
                 self.log(f"  训练失败: {e}")
                 self.finished_signal.emit(False, f"步骤 {step} 训练失败: {e}")

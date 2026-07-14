@@ -15,6 +15,11 @@ from huds_app.model.architecture import build_model
 from huds_app.core.storage import RunState, append_csv, ensure_run_dir, read_csv, resolve_device
 
 
+class TrainingAborted(Exception):
+    """Raised when training is cancelled via cancel_cb."""
+    pass
+
+
 def compute_normalization(train_df: pd.DataFrame, var_cols: list[str], out_cols: list[str], variable_configs: dict[str, dict[str, float]] | None = None) -> dict[str, dict[str, dict[str, float]]]:
     """Compute normalization statistics.
 
@@ -110,9 +115,10 @@ def train_step(
     val_loader: DataLoader,
     config: Any,
     device: torch.device | str,
-    normalization_stats: dict[str, Any] | None = None,  # FIX 5: Pass normalization for physical unit metrics
-    optimizer: torch.optim.Optimizer | None = None,       # P2-Fix D: Optional pre-built optimizer (checkpoint restore)
+    normalization_stats: dict[str, Any] | None = None,
+    optimizer: torch.optim.Optimizer | None = None,
     progress_cb: Any | None = None,
+    cancel_cb: Any | None = None,
 ) -> dict[str, float]:
     """Execute one or more training steps.
 
@@ -137,11 +143,17 @@ def train_step(
     epoch_metrics: dict[str, float] = {}
 
     for epoch in range(1, config.training.epochs_per_step + 1):
+        if cancel_cb and cancel_cb():
+            raise TrainingAborted("Training cancelled by user")
+
         model.train()
         train_loss_sum = 0.0
         train_sample_count = 0
 
         for batch_x, batch_y in train_loader:
+            if cancel_cb and cancel_cb():
+                raise TrainingAborted("Training cancelled by user")
+
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device)
 
@@ -261,7 +273,7 @@ def train_step(
     return best_metrics or epoch_metrics
 
 
-def train_model(run_dir: str | Path, config: Any, progress_cb: Any | None = None) -> dict[str, float]:
+def train_model(run_dir: str | Path, config: Any, progress_cb: Any | None = None, cancel_cb: Any | None = None) -> dict[str, float]:
     """Train the surrogate model.
     
     FIX 2: Load existing checkpoint before training (unless retrain_from_scratch is True).
@@ -345,7 +357,7 @@ def train_model(run_dir: str | Path, config: Any, progress_cb: Any | None = None
     # FIX 5: Pass normalization stats so evaluation can compute physical unit metrics
     metrics = train_step(model, train_loader, val_loader, config, device,
                          normalization_stats=normalization, optimizer=restored_optimizer,
-                         progress_cb=progress_cb)
+                         progress_cb=progress_cb, cancel_cb=cancel_cb)
 
     metrics_path = metrics_dir / "training_metrics.csv"
     append_csv(pd.DataFrame([metrics]), metrics_path)
@@ -462,12 +474,10 @@ def _make_arrays(df: pd.DataFrame, var_cols: list[str], out_cols: list[str], nor
 def _save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer, metrics: dict[str, float], path: Path) -> None:
     """Save checkpoint with full metadata for reproducibility and recovery."""
     import sys
-    import os
     import platform
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    # FIX 18: Include comprehensive metadata for reproducibility
     checkpoint = {
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
@@ -477,21 +487,8 @@ def _save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer, m
         "torch_version": torch.__version__,
         "numpy_version": np.__version__,
         "os_platform": platform.platform(),
-        "git_commit": None,  # Could be added if repository is available
+        "git_commit": None,
     }
-
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", "HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(os.path.dirname(__file__)),  # Assume repo root relative to train.py
-        )
-        if result.returncode == 0:
-            checkpoint["git_commit"] = result.stdout.strip()
-    except Exception:
-        pass
 
     torch.save(checkpoint, path)
 

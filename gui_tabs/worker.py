@@ -39,7 +39,7 @@ class HUDSWorker:
             from huds_app.interface.workflow import init_run
             from huds_app.sampling.huds import run_huds_sampling
             from huds_app.data.validation import import_labels as il
-            from huds_app.model.train import train_model
+            from huds_app.model.train import train_model, TrainingAborted
 
             config_path = os.path.join(self.run_dir, "config.json")
             with open(config_path, "w", encoding="utf-8") as f:
@@ -114,7 +114,7 @@ class HUDSWorker:
                         self._log(f"  [Train] {msg}")
                         last_print_pct[0] = percent
 
-                metrics = train_model(self.run_dir, cfg, progress_cb=progress_cb)
+                metrics = train_model(self.run_dir, cfg, progress_cb=progress_cb, cancel_cb=lambda: self.abort)
                 r2 = metrics.get("val_r2_avg", float("nan"))
                 self.r2_history.append(r2)
                 self.signals.r2_signal.emit(r2)
@@ -122,6 +122,9 @@ class HUDSWorker:
 
             self._progress(100)
             self.signals.finished_signal.emit(True, f"Completed all {max_steps} steps")
+        except TrainingAborted:
+            self._log("Workflow aborted by user during training")
+            self.signals.finished_signal.emit(False, "Aborted by user")
         except Exception as e:
             self._log(f"Error: {e}")
             import traceback
@@ -136,22 +139,32 @@ class HUDSWorker:
         sweep_script = os.path.join(
             PROJECT_ROOT, "huds_app", "interface", "maxwell_sweep.py"
         )
-        result = subprocess.run(
+        project_dir = os.path.dirname(aedt_path) if os.path.isfile(aedt_path) else aedt_path
+
+        proc = subprocess.Popen(
             [sys.executable, sweep_script, "--csv", request_csv,
              "--config", cfg_path, "--project", aedt_path, "--design", dsgn_name,
-             "--output-dir", os.path.dirname(aedt_path) if os.path.isfile(aedt_path) else aedt_path],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=600, env=env,
+             "--output-dir", project_dir],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+            env=env,
         )
-        if result.returncode != 0:
-            err = result.stderr.replace("\ufffd", "?")[:2000]
+
+        while proc.poll() is None:
+            if self.abort:
+                self._terminate_process_tree(proc)
+                raise RuntimeError("Simulation aborted by user")
+            time.sleep(0.2)
+
+        stdout, stderr = proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.replace("\ufffd", "?")[:2000]
             self._log(f"  Simulation failed:\n{err}")
-            out = result.stdout.replace("\ufffd", "?")[:1000]
+            out = stdout.replace("\ufffd", "?")[:1000]
             if out:
                 self._log(f"  Output:\n{out}")
             raise RuntimeError("maxwell_sweep.py failed")
 
-        project_dir = os.path.dirname(aedt_path) if os.path.isfile(aedt_path) else aedt_path
         output_csv = os.path.join(project_dir, "Force Plot 1.csv")
         if os.path.exists(output_csv):
             size = os.path.getsize(output_csv)
@@ -165,6 +178,20 @@ class HUDSWorker:
             self._log(f"  Saved raw timeseries: {dest}")
             return output_csv
         raise RuntimeError("Simulation output file not found")
+
+    def _terminate_process_tree(self, proc):
+        try:
+            import subprocess as sp
+            result = sp.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True, timeout=10,
+                creationflags=sp.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+        except Exception:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
 
     def _extract_labels(self, force_csv, step, run_dir, cfg):
         import pandas as pd
