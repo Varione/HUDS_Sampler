@@ -687,11 +687,7 @@ def _build_unlabeled_mask(train_pool_df, train_labeled_df, state):
 
 
 def _load_checkpoint_weights(model, checkpoint_path, device):
-    """Load checkpoint weights with strict fallback.
-
-    FIX 7: Try strict=True first, fall back to strict=False with diagnostic logging.
-    Default is now strict loading; partial loads are only used as a last resort.
-    """
+    """Load checkpoint weights with strict validation."""
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     if isinstance(checkpoint, dict):
         state_dict = (
@@ -704,18 +700,12 @@ def _load_checkpoint_weights(model, checkpoint_path, device):
         state_dict = checkpoint
 
     try:
-        # FIX 7: Use strict=True to ensure exact match
         model.load_state_dict(state_dict, strict=True)
     except RuntimeError as e:
-        print(f"Warning: strict checkpoint load failed ({e}), attempting non-strict load...")
-        missing, unexpected = model.load_state_dict(state_dict, strict=False)
-        if missing:
-            print(f"  Missing keys ({len(missing)}): {missing[:5]}{'...' if len(missing) > 5 else ''}")
-        if unexpected:
-            print(f"  Unexpected keys ({len(unexpected)}): {unexpected[:5]}{'...' if len(unexpected) > 5 else ''}")
-        # FIX 7: More conservative warning threshold (30% missing instead of 50%)
-        if len(missing) > len(model.state_dict()) * 0.3:
-            print("Warning: >30% of model keys missing from checkpoint, model may not be properly initialized")
+        raise RuntimeError(
+            f"Checkpoint architecture does not match current config at {checkpoint_path}. "
+            "Please retrain the model or restore the matching config."
+        ) from e
 
 
 def _order_request_rows(request_df, selected_ids):

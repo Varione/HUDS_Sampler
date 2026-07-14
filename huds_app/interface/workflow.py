@@ -26,9 +26,16 @@ from huds_app.core.storage import RunState, _normalize_sample_id, ensure_run_dir
 from huds_app.model.train import apply_normalization, load_normalization
 
 
-def init_run(config_path: str | Path, run_dir: str | Path, snap_to_levels: bool = False) -> dict[str, Any]:
+def init_run(config_path: str | Path, run_dir: str | Path, snap_to_levels: bool = False, overwrite: bool = False) -> dict[str, Any]:
     config = load_config(str(config_path))
     run_path = ensure_run_dir(str(run_dir))
+
+    if run_path.exists() and any(run_path.iterdir()):
+        if not overwrite:
+            raise FileExistsError(
+                f"Run directory is not empty: {run_path}. "
+                "Use overwrite=True to replace existing data."
+            )
 
     dst = run_path / "config.json"
     if Path(config_path).resolve() != dst.resolve():
@@ -163,6 +170,10 @@ def predict(run_dir: str | Path, input_path: str | Path, output_path: str | Path
 
     variable_columns = _variable_columns(config)
     _require_columns(input_df, variable_columns, Path(input_path))
+
+    errors = validate_values(input_df, variable_columns)
+    if errors:
+        raise ValueError(f"Invalid input data: {'; '.join(errors)}")
 
     model, device = _load_model_for_inference(run_path, config)
     normalization = load_normalization(run_path / "artifacts" / "normalization.json")
@@ -366,21 +377,12 @@ def _load_model_for_inference(run_dir: str | Path, config: Any) -> tuple[Any, to
         state_dict = checkpoint_data.get("model_state_dict", checkpoint_data.get("state_dict"))
         if state_dict is None:
             raise ValueError(f"Checkpoint {checkpoint_path} has no model state dict")
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=True)
     except RuntimeError as e:
-        print(f"Warning: strict checkpoint load failed ({e}), attempting non-strict load...")
-        try:
-            checkpoint_data = torch.load(checkpoint_path, map_location=device, weights_only=False)
-            state_dict = checkpoint_data.get("model_state_dict", checkpoint_data.get("state_dict"))
-            if state_dict is None:
-                raise ValueError(f"Checkpoint {checkpoint_path} has no model state dict")
-            missing, unexpected = model.load_state_dict(state_dict, strict=False)
-            if missing:
-                print(f"  Missing keys ({len(missing)}): {missing[:5]}{'...' if len(missing) > 5 else ''}")
-            if unexpected:
-                print(f"  Unexpected keys ({len(unexpected)}): {unexpected[:5]}{'...' if len(unexpected) > 5 else ''}")
-        except Exception as error:  # noqa: BLE001
-            raise RuntimeError(f"Failed to load checkpoint from {checkpoint_path}: {error}")
+        raise RuntimeError(
+            f"Checkpoint architecture does not match current config at {checkpoint_path}. "
+            "Please retrain the model or restore the matching config."
+        ) from e
 
     return model, device
 
