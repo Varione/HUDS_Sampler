@@ -1,181 +1,85 @@
-# HUDS Active Learning Core
+# HUDS Sampler
 
-Core Python implementation of a file-based Hybrid Uncertainty-driven Data
-Selection (HUDS) active-learning workflow for surrogate model training.
+Hybrid Uncertainty-driven Data Selection (HUDS) active-learning toolkit for surrogate model training, with integrated Ansys Electronics Desktop (AEDT) automation.
 
-This repository intentionally contains only the core engine:
+## Features
 
-- candidate pool generation
-- simulation request export
-- labeled result import
-- residual MLP model training
-- MC-dropout uncertainty estimation
-- uncertainty/diversity active sampling
-- validation, prediction, evaluation, and CLI orchestration
+Three desktop GUIs:
+- **Wizard** — step-by-step configuration workflow
+- **Tabs** — tabbed multi-panel interface
+- **Modern** — PySide6-based modern UI
 
-Desktop GUI, visualization panels, executable packaging, and simulator-specific
-conversion helpers have been removed.
+Core capabilities:
+- Direct COM connection to running AEDT instances or direct `.aedt` file browsing
+- Automatic variable and output detection from `.aedt` design files
+- Candidate pool generation with configurable sampling strategies
+- Seamless Maxwell parametric sweep automation (import CSV, run sweep, export results)
+- Residual MLP surrogate model training with MC-dropout uncertainty estimation
+- Active learning loop: uncertainty/diversity sampling → simulation → retraining
 
-## Install
+## Quick Start
 
-```powershell
-cd D:\TempData\huds
-pip install -e .
-```
-
-Optional FAISS acceleration for clustering:
+### Source
 
 ```powershell
-pip install -e ".[fast]"
+cd E:\大型数据库构建\HUDS
+D:\miniconda\envs\agents\python.exe gui_wizard\main.py
 ```
 
-If you prefer `requirements.txt`, it contains only the core runtime
-dependencies. `faiss-cpu` remains optional because the code automatically
-falls back to scikit-learn KMeans when FAISS is unavailable.
-
-## Test
+Or for the tabbed interface:
 
 ```powershell
-python -m pytest -q
+D:\miniconda\envs\agents\python.exe gui_tabs\main.py
 ```
 
-The current repository test suite passes with `73 passed`.
+### Packaged Build
 
-## Basic Workflow
-
-Initialize a run:
+Run PyInstaller with the provided spec file:
 
 ```powershell
-huds-app init --config examples\config.example.json --out runs\demo
+cd E:\大型数据库构建\HUDS
+D:\miniconda\envs\agents\python.exe -m PyInstaller HUDS_Wizard.spec
 ```
 
-Export validation samples:
+Output is in `dist\HUDS_Wizard\`. Use `--workpath` and `--distpath` to control build artifacts location:
 
 ```powershell
-huds-app export-validation --run runs\demo
+D:\miniconda\envs\agents\python.exe -m PyInstaller --workpath "D:\HUDS_Builds\build" --distpath "D:\HUDS_Builds" HUDS_Wizard.spec
 ```
 
-After external simulation, import validation labels:
+## Project Structure
 
-```powershell
-huds-app import-labels --run runs\demo --kind validation --input sim_val_output.csv
+```
+huds_app/
+  core/         Configuration, data models
+  interface/    AEDT COM bridge, Maxwell sweep automation, workflow orchestration
+  utils/        .aedt file parser (variables, outputs, designs)
+gui_wizard/     Step-by-step wizard GUI (PyQt5)
+gui_tabs/       Tabbed panel GUI (PyQt5)
+gui_modern/     Modern GUI (PySide6)
 ```
 
-Export the initial training batch:
+## AEDT Integration
 
-```powershell
-huds-app export-initial-train --run runs\demo
-```
+The toolkit connects to AEDT v2021.1+ via COM automation:
 
-Import training labels:
+1. Connect to a running AEDT instance or browse to an `.aedt` file directly
+2. Select project and design from dropdowns
+3. Variables and outputs are auto-detected by parsing the `.aedt` file
+4. During training, the toolkit automates Maxwell parametric sweeps: export request CSV → import into AEDT → run sweep → collect results
 
-```powershell
-huds-app import-labels --run runs\demo --kind train --step 0 --input sim_train_output.csv
-```
+When multiple `.aedt` files exist in the same directory, the toolkit matches by project name to avoid loading the wrong design.
 
-Train:
+## Dependencies
 
-```powershell
-huds-app train --run runs\demo
-```
+Python 3.10+ with:
+- PyQt5 or PySide6 (depending on GUI)
+- pywin32 (COM automation for AEDT)
+- torch, numpy, pandas, scikit-learn (ML pipeline)
+- scipy, matplotlib (analysis and visualization)
 
-Select the next active-learning batch:
+Optional: `faiss-cpu` for accelerated clustering (falls back to scikit-learn KMeans).
 
-```powershell
-huds-app sample --run runs\demo --step 1
-```
+## License
 
-Sampling is stateful. The CLI rejects:
-
-- non-positive step numbers
-- sampling the same step twice
-- skipping ahead to a later step
-- sampling beyond `training.max_steps`
-- sampling while a prior training request is still unlabeled or partially labeled
-
-Check status:
-
-```powershell
-huds-app status --run runs\demo
-```
-
-Run predictions on arbitrary candidate rows after training:
-
-```powershell
-huds-app predict --run runs\demo --input candidates.csv --output predictions.csv
-```
-
-Evaluate the current checkpoint on validation data:
-
-```powershell
-huds-app evaluate --run runs\demo
-```
-
-Convert a HUDS request CSV into a Maxwell parametric table:
-
-```powershell
-huds-app export-maxwell --run runs\demo --input runs\demo\requests\train_step_000_request.csv --output ParametricSetup1_Table.csv
-```
-
-The Maxwell export writes a CSV shaped like:
-
-```text
-*,gap,v
-1,5mm,0m_per_sec
-2,8mm,1m_per_sec
-```
-
-Variable units come from `variables[].unit` in the JSON config. You can also
-override them from the CLI:
-
-```powershell
-huds-app export-maxwell --input request.csv --output ParametricSetup1_Table.csv --unit gap=mm --unit v=m_per_sec
-```
-
-Imports are strict by default. If a simulator run only returns part of a
-requested batch, the import fails unless you explicitly allow cumulative
-partial imports:
-
-```powershell
-huds-app import-labels --run runs\demo --kind train --step 1 --input sim_out.csv --allow-partial
-```
-
-## Key Modules
-
-- `huds_app/config.py` - configuration dataclasses and validation
-- `huds_app/sampling.py` - candidate pool generation and splitting
-- `huds_app/validation.py` - request export and label import
-- `huds_app/model.py` - residual MLP model
-- `huds_app/train.py` - training, checkpoints, metrics, normalization
-- `huds_app/huds.py` - MC-dropout uncertainty and HUDS sample selection
-- `huds_app/workflow.py` - high-level workflow/status/predict/evaluate API
-- `huds_app/cli.py` - command-line interface
-
-## Data Contract
-
-Request files contain:
-
-```text
-sample_id,<variable_1>,<variable_2>,...
-```
-
-Maxwell parametric export files contain:
-
-```text
-*,<variable_1>,<variable_2>,...
-```
-
-with each variable value serialized as `number + unit`, for example `5mm` or
-`0m_per_sec`.
-
-Simulator output files must contain:
-
-```text
-sample_id,<variable_1>,<variable_2>,...,<output_1>,<output_2>,...
-```
-
-Output names are defined by `model.output_names` in the JSON config.
-
-The import path validates `sample_id` coverage, duplicate IDs, missing numeric
-values, and missing output columns before it writes anything to disk.
-
+Proprietary
