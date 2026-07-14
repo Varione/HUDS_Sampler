@@ -10,6 +10,11 @@ else:
 sys.path.insert(0, PROJECT_ROOT)
 os.environ["ANSYSLMD_LICENSE_FILE"] = "24500@licensing.hkust.edu.cn"
 
+# Load PyTorch before AEDT COM components. AEDT ships a different Intel OpenMP
+# runtime; importing PyTorch only when training starts can make c10.dll fail to
+# initialize after an AEDT connection has already loaded its native DLLs.
+import torch
+
 from PyQt5.QtWidgets import QApplication
 from gui_wizard.wizard import HUDSWizard
 

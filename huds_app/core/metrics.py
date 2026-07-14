@@ -2,7 +2,7 @@ import numpy as np
 
 
 def r2_score(y_true, y_pred):
-    if len(y_true) < 3:
+    if len(y_true) < 2:
         return float("nan")
     ss_res = np.sum((y_true - y_pred) ** 2)
     ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
@@ -29,5 +29,5 @@ def compute_metrics(y_true, y_pred, output_names=None):
 
     r2_vals = [metrics.get(f"r2_{n}", 0) for n in (output_names or [f"output_{i}" for i in range(n_outputs)])]
     valid_r2 = [v for v in r2_vals if not np.isnan(v)]
-    metrics["r2_avg"] = float(np.mean(valid_r2)) if valid_r2 else 0.0
+    metrics["r2_avg"] = float(np.mean(valid_r2)) if valid_r2 else float("nan")
     return metrics

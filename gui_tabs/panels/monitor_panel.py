@@ -47,6 +47,17 @@ class MonitorPanel(QFrame):
         layout.addWidget(self.progress_bar, row, 0, 1, 3)
         row += 1
 
+        # Sweep progress
+        sweep_layout_row = row
+        self.sweep_label = QLabel("Sweep: waiting")
+        self.sweep_label.setStyleSheet("color: gray; font-size: 12px;")
+        layout.addWidget(self.sweep_label, row, 0)
+        self.sweep_progress_bar = QProgressBar()
+        self.sweep_progress_bar.setValue(0)
+        self.sweep_progress_bar.setFixedHeight(22)
+        layout.addWidget(self.sweep_progress_bar, row, 1, 1, 2)
+        row += 1
+
         # Buttons
         self.start_btn = QPushButton("Start")
         self.start_btn.clicked.connect(self._on_start)
@@ -96,12 +107,16 @@ class MonitorPanel(QFrame):
         self._worker.signals.step_signal.connect(self._on_step)
         self._worker.signals.r2_signal.connect(self._on_r2)
         self._worker.signals.finished_signal.connect(self._on_finished)
+        self._worker.signals.sweep_progress_signal.connect(self._on_sweep_progress)
         self._thread.finished.connect(self._on_thread_finished)
 
         self.start_btn.setEnabled(False)
         self.abort_btn.setEnabled(True)
         self.log_browser.clear()
         self.progress_bar.setValue(0)
+        self.sweep_progress_bar.setValue(0)
+        self.sweep_label.setText("Sweep: waiting")
+        self.sweep_label.setStyleSheet("color: gray; font-size: 12px;")
 
         self._thread.start()
 
@@ -118,6 +133,22 @@ class MonitorPanel(QFrame):
 
     def _on_step(self, text):
         self.step_label.setText(text)
+
+    def _on_sweep_progress(self, event_type, data):
+        if event_type == "started":
+            self.sweep_progress_bar.setRange(0, 0)
+            self.sweep_label.setText("仿真运行中...")
+            self.sweep_label.setStyleSheet("color: blue; font-size: 12px;")
+        elif event_type == "completed":
+            self.sweep_progress_bar.setRange(0, 100)
+            self.sweep_progress_bar.setValue(100)
+            self.sweep_label.setText("仿真完成")
+            self.sweep_label.setStyleSheet("color: green; font-size: 12px;")
+        elif event_type == "failed":
+            self.sweep_progress_bar.setRange(0, 100)
+            self.sweep_progress_bar.setValue(0)
+            self.sweep_label.setText(f"仿真失败: {data}")
+            self.sweep_label.setStyleSheet("color: red; font-size: 12px;")
 
     def _on_r2(self, r2):
         import math

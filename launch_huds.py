@@ -451,7 +451,7 @@ for step in range(1, cfg.training.max_steps + 1):
                 json.dump(full_config, f, indent=2, ensure_ascii=False)
             cfg = load_config(config_path)
 
-    imported = il(run_dir, step, label_path, overwrite=True)
+     imported = il(run_dir, step, label_path, overwrite=False)
     print(f"  导入了 {imported} 条标签")
 
     _last_train_percent = [0]

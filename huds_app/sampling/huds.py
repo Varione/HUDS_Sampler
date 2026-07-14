@@ -161,133 +161,145 @@ def select_huds(model, train_pool_df, unlabeled_mask, train_labeled_df, config, 
         n_topk = min(len(candidate_pool), max(1, int(topk_ratio * len(candidate_pool))))
         topk_positions = np.argsort(-uncertainties)[:n_topk]
 
-    topk_pool = candidate_pool.iloc[topk_positions].copy()
-    topk_uncertainties = uncertainties[topk_positions]
-    n_clusters = min(n_select, len(topk_positions))
+    parameter_features = candidate_pool[var_cols].to_numpy(dtype=np.float32)
+    reference_features = _normalized_labeled_features(train_labeled_df, config, var_cols)
+    selected_positions = _select_uncertain_diverse_positions(
+        topk_positions,
+        uncertainties,
+        parameter_features,
+        reference_features,
+        n_select,
+    )
+    selected_ids = [
+        _normalize_sample_id(_sample_id(candidate_pool, pos))
+        for pos in selected_positions
+    ]
+    selected_uncertainties = [float(uncertainties[pos]) for pos in selected_positions]
+    min_labeled_distances = _distances_to_reference(
+        selected_positions, parameter_features, reference_features
+    )
 
-    # --- 3. Embedding space clustering ---
-    mean_embedding = repeat_embeddings.mean(axis=0)  # (n_candidates, hidden_dim)
-    standardized_topk = _standardize(mean_embedding[topk_positions].astype(np.float32))
-    labels = _cluster_topk(standardized_topk, n_clusters, config)
-
-    # --- 4. Cluster representative selection (returns positions in candidate_pool) ---
-    cluster_positions: list[int] = []
-    cluster_stats_out: dict[str, dict] = {}
-    for cluster_id in range(n_clusters):
-        member_indices = np.flatnonzero(labels == cluster_id)  # local indices in topk_pool
-
-        if member_indices.size == 0:
-            cluster_stats_out[str(cluster_id)] = {
-                "size": 0, "selected_id": None,
-                "max_uncertainty": None, "mean_uncertainty": None,
-            }
-            continue
-
-        # FIX 5: For single-member clusters, select the only member directly.
-        # Single-member clusters indicate isolated points in embedding space,
-        # which are precisely the novel/boundary samples active learning should target.
-        if member_indices.size == 1:
-            local_best = member_indices[0]
-        else:
-            local_best = member_indices[np.argmax(topk_uncertainties[member_indices])]
-        candidate_position = int(topk_pool.index[local_best])  # position in candidate_pool
-
-        cluster_positions.append(candidate_position)
-        cluster_uncertainties = topk_uncertainties[member_indices]
-        cluster_stats_out[str(cluster_id)] = {
-            "size": int(member_indices.size),
-            "selected_id": _normalize_sample_id(_sample_id(topk_pool, local_best)),
-            "max_uncertainty": float(cluster_uncertainties.max()),
-            "mean_uncertainty": float(cluster_uncertainties.mean()),
-        }
-
-    # --- 5. Build result ---
-    used_fallback = False
-    if not cluster_positions:
-        fallback_n = min(n_select, len(candidate_pool))
-        fallback_indices = np.argsort(-uncertainties)[:fallback_n]
-        selected_ids = [
-            _normalize_sample_id(_sample_id(candidate_pool, int(pos)))
-            for pos in fallback_indices
-        ]
-        selected_uncertainties = [float(uncertainties[pos]) for pos in fallback_indices]
-        cluster_positions = [int(pos) for pos in fallback_indices]
-        used_fallback = True
-        print(
-            f"Warning: all {n_clusters} clusters had 0 members, "
-            f"falling back to Top-K selection ({len(fallback_indices)} samples)"
-        )
-    else:
-        selected_ids = [
-            _normalize_sample_id(_sample_id(candidate_pool, pos))
-            for pos in cluster_positions
-        ]
-        selected_uncertainties = [float(uncertainties[pos]) for pos in cluster_positions]
-
-    # --- 6. Fill with k-center from high-uncertainty candidates only ---
-    used_fill = False
-    if len(selected_ids) < n_select:
-        used_fill = True
-        # FIX 11: Only select fillers from the top-k uncertainty pool, not the full candidate set
-        # This maintains the principle of uncertainty priority even during filling
-
-        # FIX 4: Only fill from the Top-K high-uncertainty pool, not the full candidate set
-        already_selected = set(cluster_positions)
-        remaining_positions = [
-            int(pos) for pos in topk_positions if int(pos) not in already_selected
-        ]
-
-        if remaining_positions:
-            # Extract features and uncertainties for remaining candidates
-            remaining_features = mean_embedding[remaining_positions].astype(np.float32)
-            remaining_uncertainties = uncertainties[remaining_positions]
-
-            # Initialize min_dist from remaining samples to the selected set
-            n_remaining = len(remaining_positions)
-            min_dist = np.full(n_remaining, np.inf)
-
-            # Calculate initial distances from each remaining sample to the selected positions
-            for pos in cluster_positions:
-                dists = euclidean_distances(remaining_features, mean_embedding[[pos]]).flatten()
-                min_dist = np.minimum(min_dist, dists)
-
-            # Greedily select samples to fill up to n_select
-            added_remaining = []
-            while len(selected_ids) < n_select and len(added_remaining) < n_remaining:
-                # Set distance of already selected (from remaining) samples to -inf
-                for idx in added_remaining:
-                    min_dist[idx] = -np.inf
-
-                next_idx = int(np.argmax(min_dist))
-                original_pos = remaining_positions[next_idx]
-
-                cluster_positions.append(original_pos)
-                selected_ids.append(_normalize_sample_id(_sample_id(candidate_pool, original_pos)))
-                selected_uncertainties.append(float(uncertainties[original_pos]))
-                added_remaining.append(next_idx)
-
-                # Update min_dist incrementally with the newly added sample
-                dists = euclidean_distances(remaining_features, mean_embedding[[original_pos]]).flatten()
-                min_dist = np.minimum(min_dist, dists)
-        else:
-            print("Warning: no remaining candidates to fill; selected all available samples")
-
-
-    # Split selected samples into train/val/test sets per config.split
+    # Split selected samples into train/val/test sets per config.split.
     split_ids = _split_selected_ids(selected_ids, config)
-
-    # FIX 6: Diagnostic fields accurately reflect the actual sampling process
     return {
         "selected_ids": selected_ids,
         "uncertainties": selected_uncertainties,
         "topk_size": int(len(topk_positions)),
-        "n_clusters": int(n_clusters),
-        "cluster_stats": cluster_stats_out,
+        "n_clusters": 0,
+        "cluster_stats": {},
         "checkpoint_used": "",
-        "selection_method": "topk_fallback" if used_fallback else "clustering",
-        "fill_method": "k_center_from_high_uncertainty" if used_fill else None,
+        "selection_method": "output_uncertainty_topk_parameter_maximin",
+        "fill_method": "parameter_space_k_center",
+        "uncertainty_metric": (
+            "mc_dropout_output_variance_normalized"
+            if bool(config.huds.uncertainty_on_outputs)
+            else "mc_dropout_embedding_variance"
+        ),
+        "topk_uncertainty_threshold": float(uncertainties[topk_positions].min()),
+        "min_distance_to_existing_labeled": min_labeled_distances,
         "split_assignment": split_ids,
     }
+
+
+def select_initial_space_filling(train_pool_df, unlabeled_mask, train_labeled_df, config, var_cols):
+    """Select the first labeled batch with deterministic parameter-space maximin."""
+    _validate_selection_inputs(train_pool_df, var_cols)
+    candidate_pool = _filter_unlabeled_pool(train_pool_df, unlabeled_mask, train_labeled_df)
+    if candidate_pool.empty:
+        return _empty_selection_result()
+
+    n_select = min(int(config.training.initial_train_size), len(candidate_pool))
+    features = candidate_pool[var_cols].to_numpy(dtype=np.float32)
+    selected_positions = _select_maximin_positions(
+        np.arange(len(candidate_pool), dtype=np.intp),
+        features,
+        np.empty((0, features.shape[1]), dtype=np.float32),
+        n_select,
+        seed_at_center=True,
+    )
+    selected_ids = [
+        _normalize_sample_id(_sample_id(candidate_pool, pos))
+        for pos in selected_positions
+    ]
+    return {
+        "selected_ids": selected_ids,
+        "uncertainties": [None] * len(selected_ids),
+        "topk_size": int(len(candidate_pool)),
+        "n_clusters": 0,
+        "cluster_stats": {},
+        "checkpoint_used": "",
+        "selection_method": "initial_parameter_space_maximin",
+        "fill_method": "parameter_space_k_center",
+        "uncertainty_metric": "not_available_initial_parameter_space_filling",
+        "topk_uncertainty_threshold": None,
+        "min_distance_to_existing_labeled": [None] * len(selected_ids),
+        "split_assignment": _split_selected_ids(selected_ids, config),
+    }
+
+
+def _normalized_labeled_features(train_labeled_df, config, var_cols):
+    if train_labeled_df.empty or any(column not in train_labeled_df.columns for column in var_cols):
+        return np.empty((0, len(var_cols)), dtype=np.float32)
+
+    ranges = {variable.name: (float(variable.min), float(variable.max)) for variable in config.variables}
+    values = train_labeled_df[var_cols].to_numpy(dtype=np.float32)
+    mins = np.array([ranges[column][0] for column in var_cols], dtype=np.float32)
+    maxs = np.array([ranges[column][1] for column in var_cols], dtype=np.float32)
+    return (values - mins) / np.maximum(maxs - mins, 1e-8)
+
+
+def _select_uncertain_diverse_positions(topk_positions, uncertainties, features, reference_features, n_select):
+    """Select only high-uncertainty candidates, maximizing parameter-space novelty."""
+    positions = np.asarray(topk_positions, dtype=np.intp)
+    if len(positions) == 0 or n_select <= 0:
+        return []
+
+    # The seed is the most uncertain candidate. Every later pick remains in
+    # Top-K and is chosen by its largest minimum distance to prior coverage.
+    seed = int(positions[np.argmax(uncertainties[positions])])
+    return _select_maximin_positions(
+        positions,
+        features,
+        reference_features,
+        n_select,
+        initial_position=seed,
+    )
+
+
+def _distances_to_reference(selected_positions, features, reference_features):
+    if not len(reference_features):
+        return [None] * len(selected_positions)
+    return [
+        float(euclidean_distances(features[[position]], reference_features).min())
+        for position in selected_positions
+    ]
+
+
+def _select_maximin_positions(positions, features, reference_features, n_select, initial_position=None, seed_at_center=False):
+    positions = np.asarray(positions, dtype=np.intp)
+    if len(positions) == 0 or n_select <= 0:
+        return []
+
+    selected = []
+    if initial_position is not None:
+        selected.append(int(initial_position))
+    elif len(reference_features):
+        distances = euclidean_distances(features[positions], reference_features).min(axis=1)
+        selected.append(int(positions[np.argmax(distances)]))
+    elif seed_at_center:
+        center_distances = np.sum((features[positions] - 0.5) ** 2, axis=1)
+        selected.append(int(positions[np.argmin(center_distances)]))
+    else:
+        selected.append(int(positions[0]))
+
+    while len(selected) < min(n_select, len(positions)):
+        remaining = np.array([pos for pos in positions if pos not in set(selected)], dtype=np.intp)
+        anchors = features[np.asarray(selected, dtype=np.intp)]
+        if len(reference_features):
+            anchors = np.vstack((reference_features, anchors))
+        distances = euclidean_distances(features[remaining], anchors).min(axis=1)
+        selected.append(int(remaining[np.argmax(distances)]))
+    return selected
 
 
 def _split_selected_ids(selected_ids: list[str], config: AppConfig) -> dict[str, list[str]]:
@@ -374,20 +386,29 @@ def run_huds_sampling(run_dir, config, step):
 
     unlabeled_mask = _build_unlabeled_mask(candidate_pool_df, all_labeled_df, state)
 
-    device_obj = resolve_device(app_config.training.device)
-    model = build_model(app_config).to(device_obj)
-    if not is_initial_step and checkpoint_path.exists():
-        _load_checkpoint_weights(model, checkpoint_path, device_obj)
+    if is_initial_step:
+        result = select_initial_space_filling(
+            train_pool_df=normalized_pool_df,
+            unlabeled_mask=unlabeled_mask,
+            train_labeled_df=all_labeled_df,
+            config=app_config,
+            var_cols=variable_columns,
+        )
+    else:
+        device_obj = resolve_device(app_config.training.device)
+        model = build_model(app_config).to(device_obj)
+        if checkpoint_path.exists():
+            _load_checkpoint_weights(model, checkpoint_path, device_obj)
 
-    result = select_huds(
-        model=model,
-        train_pool_df=normalized_pool_df,
-        unlabeled_mask=unlabeled_mask,
-        train_labeled_df=all_labeled_df,
-        config=app_config,
-        var_cols=variable_columns,
-        device=device_obj,
-    )
+        result = select_huds(
+            model=model,
+            train_pool_df=normalized_pool_df,
+            unlabeled_mask=unlabeled_mask,
+            train_labeled_df=all_labeled_df,
+            config=app_config,
+            var_cols=variable_columns,
+            device=device_obj,
+        )
     result["checkpoint_used"] = str(checkpoint_path)
 
     selected_ids = result["selected_ids"]
@@ -395,6 +416,34 @@ def run_huds_sampling(run_dir, config, step):
     selected_ids_str = [str(sid) for sid in selected_ids]
     request_df = candidate_pool_df[candidate_pool_df[SAMPLE_ID_COLUMN].isin(selected_ids_str)].copy()
     request_df = _order_request_rows(request_df, selected_ids_str)
+    request_df[variable_columns] = request_df[variable_columns].round(5)
+
+    selected_parameters = []
+    selected_uncertainties = result.get("uncertainties", [])
+    min_labeled_distances = result.get("min_distance_to_existing_labeled", [])
+    for index, (_, row) in enumerate(request_df.iterrows()):
+        selected_parameters.append({
+            "sample_id": _normalize_sample_id(row[SAMPLE_ID_COLUMN]),
+            "parameters": {
+                column: round(float(row[column]), 5)
+                for column in variable_columns
+            },
+            "output_uncertainty": (
+                selected_uncertainties[index]
+                if index < len(selected_uncertainties) else None
+            ),
+            "min_distance_to_existing_labeled": (
+                min_labeled_distances[index]
+                if index < len(min_labeled_distances) else None
+            ),
+        })
+    result["selection_audit"] = {
+        "uncertainty_metric": result.get("uncertainty_metric"),
+        "topk_size": result.get("topk_size"),
+        "topk_uncertainty_threshold": result.get("topk_uncertainty_threshold"),
+        "parameter_distance_metric": "euclidean_on_config_range_normalized_parameters",
+        "selected_samples": selected_parameters,
+    }
 
     # Add split assignment column to request CSV for import_labels routing
     split_map = {str(sid): split_type for split_type, sids in split_assignment.items() for sid in sids}

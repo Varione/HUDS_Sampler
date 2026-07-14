@@ -135,6 +135,30 @@ class ConfigPage(QWizardPage):
 
         train_group.setLayout(train_layout)
         layout.addWidget(train_group)
+
+        sampling_group = QGroupBox("HUDS 采样设置")
+        sampling_layout = QVBoxLayout()
+
+        sampling_row = QHBoxLayout()
+        sampling_row.addWidget(QLabel("MC Dropout 次数:"))
+        self.mc_repeats_spin = QSpinBox()
+        self.mc_repeats_spin.setRange(2, 100)
+        self.mc_repeats_spin.setValue(30)
+        sampling_row.addWidget(self.mc_repeats_spin)
+        sampling_layout.addLayout(sampling_row)
+
+        topk_row = QHBoxLayout()
+        topk_row.addWidget(QLabel("高不确定候选比例:"))
+        self.topk_ratio_spin = QDoubleSpinBox()
+        self.topk_ratio_spin.setRange(0.05, 1.0)
+        self.topk_ratio_spin.setSingleStep(0.05)
+        self.topk_ratio_spin.setDecimals(2)
+        self.topk_ratio_spin.setValue(0.25)
+        topk_row.addWidget(self.topk_ratio_spin)
+        sampling_layout.addLayout(topk_row)
+
+        sampling_group.setLayout(sampling_layout)
+        layout.addWidget(sampling_group)
         layout.addStretch()
 
     def _auto_fill_outputs(self):
@@ -173,7 +197,7 @@ class ConfigPage(QWizardPage):
         self.var_table.setRowCount(len(detected))
         for i, var in enumerate(detected):
             cb = QCheckBox()
-            cb.setChecked(True)
+            cb.setChecked(False)
             cb_widget = QWidget()
             cb_layout = QHBoxLayout(cb_widget)
             cb_layout.addWidget(cb)
@@ -287,10 +311,11 @@ class ConfigPage(QWizardPage):
                 "device": self.device_combo.currentText(),
             },
             "huds": {
-                "repeat_times": 10,
-                "topk_ratio": 0.6,
+                "repeat_times": self.mc_repeats_spin.value(),
+                "topk_ratio": self.topk_ratio_spin.value(),
                 "batch_size": 128,
                 "use_faiss": False,
+                "uncertainty_on_outputs": True,
             },
             "steady_state_pct": self.steady_pct_spin.value(),
         }

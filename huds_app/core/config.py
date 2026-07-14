@@ -150,12 +150,12 @@ if PYDANTIC_AVAILABLE:
 
     class HUDSConfigPydantic(BaseModel):
         repeat_times: int = Field(default=30, ge=2)  # FIX 5: Must be >= 2
-        topk_ratio: float = Field(default=0.6, gt=0, le=1)
+        topk_ratio: float = Field(default=0.25, gt=0, le=1)
         batch_size: int = Field(default=256, gt=0)
         use_faiss: bool = True
         use_top_p: bool = False
         top_p_threshold: float = Field(default=0.9, gt=0, le=1)
-        uncertainty_on_outputs: bool = False
+        uncertainty_on_outputs: bool = True
         top_p_temperature: float = Field(default=1.0, gt=0)
 
     class ModelConfigPydantic(BaseModel):
@@ -282,13 +282,13 @@ class TrainingConfig:
 @dataclass
 class HUDSConfig:
     repeat_times: int = 30
-    topk_ratio: float = 0.6
+    topk_ratio: float = 0.25
     batch_size: int = 256
     use_faiss: bool = True
     use_top_p: bool = False
     top_p_threshold: float = 0.9
     # FIX 13: Output-space uncertainty estimation (default False for backward compatibility)
-    uncertainty_on_outputs: bool = False
+    uncertainty_on_outputs: bool = True
     # FIX 14: Temperature scaling for Top-P softmax (default 1.0 = no change)
     top_p_temperature: float = 1.0
 

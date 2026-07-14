@@ -88,7 +88,17 @@ class AEDTPage(QWizardPage):
 
         try:
             from win32com.client import Dispatch
-            from huds_app.interface.maxwell_sweep import ensure_aedt_running
+            # Load maxwell_sweep directly by file path to avoid triggering
+            # interface/__init__.py -> workflow.py -> import torch (DLL failure)
+            import importlib.util as _iu
+            _ms_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                'huds_app', 'interface', 'maxwell_sweep.py',
+            )
+            _ms_spec = _iu.spec_from_file_location('maxwell_sweep', _ms_path)
+            _ms_mod = _iu.module_from_spec(_ms_spec)
+            _ms_spec.loader.exec_module(_ms_mod)
+            ensure_aedt_running = _ms_mod.ensure_aedt_running
 
             prog_ids = [
                 "Ansoft.ElectronicsDesktop.2021.1",

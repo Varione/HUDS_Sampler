@@ -297,10 +297,18 @@ def train_model(run_dir: str | Path, config: Any, progress_cb: Any | None = None
         val_idx = rng.choice(len(train_df), size=n_val, replace=False)
         val_df = train_df.iloc[val_idx].copy()
         print(f"  Warning: val_labeled.csv not found, using {n_val} train samples as validation")
+
+    # The test split is reserved for final evaluation. It is intentionally not
+    # converted to a DataLoader or used by train_step, but its current size is
+    # reported so each training round is auditable.
+    test_path = datasets_dir / "test_labeled.csv"
+    test_df = read_csv(test_path) if test_path.exists() else None
     var_cols = [variable.name for variable in config.variables]
     out_cols = list(config.model.output_names)
     _validate_columns(train_df, var_cols + out_cols, datasets_dir / "train_labeled.csv")
     _validate_columns(val_df, var_cols + out_cols, datasets_dir / "val_labeled.csv")
+    if test_df is not None:
+        _validate_columns(test_df, var_cols + out_cols, test_path)
 
     normalization_path = artifacts_dir / "normalization.json"
     if normalization_path.exists():
@@ -313,6 +321,16 @@ def train_model(run_dir: str | Path, config: Any, progress_cb: Any | None = None
 
     train_x, train_y = _make_arrays(train_df, var_cols, out_cols, normalization)
     val_x, val_y = _make_arrays(val_df, var_cols, out_cols, normalization)
+    test_size = len(test_df) if test_df is not None else 0
+    dataset_message = (
+        f"数据集大小: 训练集 {len(train_x)}, 验证集 {len(val_x)}, "
+        f"测试集 {test_size}"
+    )
+    print(f"  {dataset_message}")
+    if progress_cb is not None:
+        progress_cb(dataset_message, 0)
+    if len(val_x) < 5:
+        print(f"  警告: 验证集过小 ({len(val_x)} 样本), R2 可能不可靠")
     train_loader = DataLoader(
         TensorDataset(torch.from_numpy(train_x), torch.from_numpy(train_y)),
         batch_size=config.training.batch_size,
@@ -341,18 +359,24 @@ def train_model(run_dir: str | Path, config: Any, progress_cb: Any | None = None
         try:
             checkpoint_data = torch.load(checkpoint_latest, map_location=device, weights_only=False)
             model.load_state_dict(checkpoint_data["model_state_dict"])
+            print("Model weights loaded successfully")
 
             # P2-Fix D: Optionally restore optimizer state for continuous training momentum
             if getattr(config.training, 'restore_optimizer_state', True):
-                optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
-                optimizer.load_state_dict(checkpoint_data["optimizer_state_dict"])
-                _move_optimizer_to_device(optimizer, device)
-                restored_optimizer = optimizer
-                print("Checkpoint and optimizer state loaded successfully")
+                try:
+                    optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
+                    optimizer.load_state_dict(checkpoint_data["optimizer_state_dict"])
+                    _move_optimizer_to_device(optimizer, device)
+                    restored_optimizer = optimizer
+                    print("Checkpoint and optimizer state loaded successfully")
+                except Exception as e:
+                    print(f"Warning: Optimizer state incompatible ({e}), resetting optimizer but keeping model weights")
             else:
                 print("Checkpoint loaded (optimizer reset per config)")
+        except KeyError as e:
+            raise RuntimeError(f"Checkpoint structure mismatch: missing key {e}. Use retrain_from_scratch=True to start fresh.") from e
         except Exception as e:
-            print(f"Warning: Failed to load checkpoint ({e}), training from scratch")
+            raise RuntimeError(f"Failed to load model weights from checkpoint ({e}). Use retrain_from_scratch=True to start fresh.") from e
 
     # FIX 5: Pass normalization stats so evaluation can compute physical unit metrics
     metrics = train_step(model, train_loader, val_loader, config, device,

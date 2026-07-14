@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import time
+import traceback
 
 import numpy as np
 import pandas as pd
@@ -23,6 +24,7 @@ class HUDSWorker(QThread):
     r2_signal = pyqtSignal(float)
     step_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(bool, str)
+    sweep_progress_signal = pyqtSignal(str, int)  # event_type, data
 
     def __init__(self, config_dict, run_dir, aedt_path, design_name):
         super().__init__()
@@ -35,7 +37,30 @@ class HUDSWorker(QThread):
     def log(self, message):
         self.log_signal.emit(str(message))
 
+    def _sweep_progress_cb(self, event_type, data):
+        """Lifecycle callback from maxwell_sweep."""
+        if event_type == "started":
+            self.sweep_progress_signal.emit("started", 0)
+            self.log("  仿真已开始运行")
+        elif event_type == "completed":
+            self.sweep_progress_signal.emit("completed", 1)
+            self.log("  仿真完成")
+            if self.abort:
+                self.log("  仿真期间收到中止请求，将在仿真结束后停止")
+        elif event_type == "failed":
+            self.sweep_progress_signal.emit("failed", 0)
+            self.log(f"  仿真失败: {data}")
+
     def run(self):
+        try:
+            self._run_training()
+        except Exception as exc:
+            details = traceback.format_exc()
+            self.log(f"Training initialization failed: {exc}")
+            self.log(details)
+            self.finished_signal.emit(False, f"Training initialization failed: {exc}")
+
+    def _run_training(self):
         from huds_app.sampling.huds import run_huds_sampling
         from huds_app.data.validation import import_labels as il
         from huds_app.model.train import train_model, TrainingAborted
@@ -87,15 +112,24 @@ class HUDSWorker(QThread):
                 self.finished_signal.emit(False, f"步骤 {step} 读取请求表失败")
                 return
 
+            abort_during_sweep = False
             try:
                 force_csv = self._run_maxwell_sweep(request_path, config_path, step)
             except Exception as e:
-                self.log(f"  Maxwell 仿真失败: {e}")
-                self.finished_signal.emit(False, f"步骤 {step} 仿真失败: {e}")
+                if self.abort:
+                    abort_during_sweep = True
+                    self.log("  仿真期间收到中止请求，将在仿真结束后停止")
+                else:
+                    self.log(f"  Maxwell 仿真失败: {e}")
+                    self.finished_signal.emit(False, f"步骤 {step} 仿真失败: {e}")
+                    return
+
+            if self.abort or abort_during_sweep:
+                self.finished_signal.emit(False, "训练已被用户中止")
                 return
 
             try:
-                label_path, out_names = self._extract_labels(force_csv, step, cfg)
+                label_path, out_names, skipped_ids = self._extract_labels(force_csv, step, cfg)
             except Exception as e:
                 self.log(f"  提取标签失败: {e}")
                 self.finished_signal.emit(False, f"步骤 {step} 提取标签失败: {e}")
@@ -114,21 +148,20 @@ class HUDSWorker(QThread):
                     cfg = load_config(config_path)
 
             try:
-                imported = il(self.run_dir, step, label_path, overwrite=True)
+                imported = il(self.run_dir, step, label_path, overwrite=False, skipped_ids=skipped_ids)
                 self.log(f"  导入了 {imported} 条标签")
             except Exception as e:
                 self.log(f"  导入标签失败: {e}")
                 self.finished_signal.emit(False, f"步骤 {step} 导入标签失败: {e}")
                 return
 
-            last_print_pct = [0]
+            # Allow the training-start dataset summary (reported at 0%) through.
+            last_print_pct = [-10]
 
             def progress_cb(msg, percent):
                 if percent - last_print_pct[0] >= 10 or percent == 100:
                     self.log(f"  [Train] {msg}")
-                    train_progress = int(
-                        progress_base + (step - 1) / max_steps * 100 + percent / 10
-                    )
+                    train_progress = int(progress_base + percent * (1 / max_steps))
                     self.progress_signal.emit(min(99, train_progress))
                     last_print_pct[0] = percent
 
@@ -172,6 +205,10 @@ class HUDSWorker(QThread):
         os.environ["ANSYSLMD_LICENSE_FILE"] = "24500@licensing.hkust.edu.cn"
 
         project_dir = os.path.dirname(self.aedt_path) if os.path.isfile(self.aedt_path) else self.aedt_path
+        step_output_dir = os.path.join(project_dir, f"sweep_step{step}")
+        os.makedirs(step_output_dir, exist_ok=True)
+
+        start_time = time.time()
 
         from huds_app.interface.maxwell_sweep import run_sweep
         exported = run_sweep(
@@ -179,25 +216,30 @@ class HUDSWorker(QThread):
             config_path=cfg_path,
             project_path=self.aedt_path,
             design_name=self.design_name,
-            output_dir=project_dir,
+            output_dir=step_output_dir,
+            progress_cb=self._sweep_progress_cb,
         )
 
         self.log(f"  仿真完成，导出了 {len(exported)} 个文件")
 
-        project_dir = os.path.dirname(self.aedt_path) if os.path.isfile(self.aedt_path) else self.aedt_path
-        output_csv = os.path.join(project_dir, "Force Plot 1.csv")
-        if os.path.exists(output_csv):
-            size = os.path.getsize(output_csv)
-            self.log(f"  已导出: {output_csv} ({size} bytes)")
+        if not exported:
+            raise RuntimeError("仿真未导出任何文件")
 
-            import shutil
-            raw_dir = os.path.join(self.run_dir, "raw_outputs")
-            os.makedirs(raw_dir, exist_ok=True)
-            dest = os.path.join(raw_dir, f"step{step}_force_timeseries.csv")
-            shutil.copy2(output_csv, dest)
-            self.log(f"  已保存原始时序文件: {dest}")
-            return output_csv
-        raise RuntimeError("仿真结果文件不存在")
+        output_csv = exported[0]
+        size = os.path.getsize(output_csv)
+        elapsed = time.time() - start_time
+        self.log(f"  已导出: {output_csv} ({size} bytes, {elapsed:.1f}s)")
+
+        if size == 0:
+            raise RuntimeError("仿真输出文件为空")
+
+        import shutil
+        raw_dir = os.path.join(self.run_dir, "raw_outputs", f"step_{step:03d}")
+        os.makedirs(raw_dir, exist_ok=True)
+        dest = os.path.join(raw_dir, "force_timeseries.csv")
+        shutil.copy2(output_csv, dest)
+        self.log(f"  已保存原始时序文件: {dest}")
+        return output_csv
 
     def _extract_labels(self, force_csv, step, cfg):
         request_path = os.path.join(
@@ -242,6 +284,23 @@ class HUDSWorker(QThread):
         self.log(f"  请求表行数: {len(request_df)}")
         self.log(f"  仿真结果列数: {len(df.columns)-1}")
 
+        # Check time series length consistency: only keep samples whose effective data length
+        # matches the maximum length across all samples. Skip shorter (incomplete) ones.
+        col_valid_lengths = {}
+        for col, (clean_prefix, vars_in_col) in col_var_map.items():
+            valid_count = int(pd.to_numeric(df[col], errors="coerce").notna().sum())
+            col_valid_lengths[col] = valid_count
+        max_length = max(col_valid_lengths.values()) if col_valid_lengths else 0
+        valid_cols = {col for col, length in col_valid_lengths.items() if length == max_length}
+        invalid_cols = {col for col, length in col_valid_lengths.items() if length < max_length}
+
+        if invalid_cols:
+            self.log(
+                f"  警告: {len(invalid_cols)} 个样本时间序列数据不完整 "
+                f"(长度 < {max_length}), 将跳过并保留在候选池中。"
+            )
+
+        skipped_ids = set()
         label_rows = []
         for _, req_row in request_df.iterrows():
             req_vals = {}
@@ -252,6 +311,29 @@ class HUDSWorker(QThread):
                         req_vals[vn] = float(raw)
                     except ValueError:
                         req_vals[vn] = raw
+
+            # Find matching columns for this request row
+            matched_col = None
+            for col, (clean_prefix, vars_in_col) in col_var_map.items():
+                match = True
+                for vn in var_names:
+                    if vn not in vars_in_col or vn not in req_vals:
+                        match = False
+                        break
+                    if isinstance(vars_in_col[vn], float) and isinstance(req_vals[vn], float):
+                        if abs(vars_in_col[vn] - req_vals[vn]) > 1e-6:
+                            match = False
+                    else:
+                        if str(vars_in_col[vn]) != str(req_vals[vn]):
+                            match = False
+                if match:
+                    matched_col = col
+                    break
+
+            # Skip samples with incomplete time series data
+            if matched_col and matched_col not in valid_cols:
+                skipped_ids.add(req_row[SAMPLE_ID_COLUMN])
+                continue
 
             row_data = {SAMPLE_ID_COLUMN: req_row[SAMPLE_ID_COLUMN]}
             for vn in var_names:
@@ -286,7 +368,7 @@ class HUDSWorker(QThread):
         self.log(f"  匹配到 {len(label_rows)} 行, 每行 {len(label_rows[0]) if label_rows else 0} 列")
 
         if not label_rows:
-            raise RuntimeError("未能从仿真结果中提取任何数据")
+            raise RuntimeError("所有样本时间序列数据不完整，无有效数据可用。")
 
         has_outputs = any(any(k in out_names and v is not None for k, v in r.items()) for r in label_rows)
         if not has_outputs:
@@ -297,4 +379,4 @@ class HUDSWorker(QThread):
         label_path = os.path.join(self.run_dir, "data", f"step{step}_labels.csv")
         cols = [SAMPLE_ID_COLUMN] + var_names + out_names
         write_csv(merged[cols], label_path)
-        return label_path, out_names
+        return label_path, out_names, skipped_ids

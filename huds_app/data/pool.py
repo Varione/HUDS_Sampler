@@ -37,7 +37,16 @@ def create_candidate_pool(config: Any, snap_to_levels: bool = False) -> pd.DataF
         values_by_variable.append(column)
 
     sample_array = np.column_stack(values_by_variable) if values_by_variable else np.empty((total_samples, 0))
+    # Simulation inputs are persisted and dispatched with a fixed precision so
+    # candidate-pool values, AEDT requests, and diagnostics stay reproducible.
+    sample_array = np.round(sample_array, decimals=5)
     pool_df = pd.DataFrame(sample_array, columns=pd.Index(variable_names))
+    if variable_names and pool_df.duplicated(subset=variable_names).any():
+        duplicate_count = int(pool_df.duplicated(subset=variable_names).sum())
+        raise ValueError(
+            f"Rounding to 5 decimal places produced {duplicate_count} duplicate parameter sets. "
+            "Increase the parameter range or reduce candidate_pool.total_samples."
+        )
     pool_df.insert(0, "status", "unlabeled")
     pool_df.insert(0, "sample_id", np.arange(total_samples, dtype=int))
     return pool_df
@@ -49,7 +58,7 @@ def save_pool_files(pool_df: pd.DataFrame, run_dir: str | Path) -> None:
 
     variable_columns = [column for column in pool_df.columns if column not in {"status"}]
 
-    pool_df.to_csv(output_dir / "candidate_pool.csv", index=False)
+    pool_df.to_csv(output_dir / "candidate_pool.csv", index=False, float_format="%.5f")
 
 
 def _snap_column_to_levels(column: np.ndarray, min_value: float, max_value: float, sample_points: int) -> np.ndarray:

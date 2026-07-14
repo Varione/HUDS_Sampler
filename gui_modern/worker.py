@@ -16,6 +16,7 @@ class HUDSWorker(QThread):
     step_done_signal = Signal(int, dict)
     finished_all_signal = Signal(list)
     error_signal = Signal(str)
+    sweep_progress_signal = Signal(str, int)  # event_type, data
 
     def __init__(self, config_dict, aedt_path, design_name, project_dir):
         super().__init__()
@@ -82,7 +83,7 @@ class HUDSWorker(QThread):
                     request_path, config_path, self.aedt_path, self.design_name, step, run_dir
                 )
 
-                label_path, out_names = self._extract_labels(
+                label_path, out_names, skipped_ids = self._extract_labels(
                     force_csv, step, run_dir, cfg
                 )
 
@@ -98,10 +99,11 @@ class HUDSWorker(QThread):
                             json.dump(full_config, f, indent=2, ensure_ascii=False)
                         cfg = load_config(config_path)
 
-                imported = il(run_dir, step, label_path, overwrite=True)
+                imported = il(run_dir, step, label_path, overwrite=False, skipped_ids=skipped_ids)
                 self._log(f"  Imported {imported} labels")
 
-                last_print_pct = [0]
+                # Allow the training-start dataset summary (reported at 0%) through.
+                last_print_pct = [-10]
                 def progress_cb(msg, percent):
                     if percent - last_print_pct[0] >= 10 or percent == 100:
                         self._log(f"  [Train] {msg}")
@@ -144,43 +146,89 @@ class HUDSWorker(QThread):
         )
         project_dir = os.path.dirname(aedt_path) if os.path.isfile(aedt_path) else aedt_path
 
-        proc = subprocess.Popen(
-            [sys.executable, sweep_script,
-             "--csv", request_csv,
-             "--config", cfg_path,
-             "--project", aedt_path,
-             "--design", dsgn_name,
-             "--output-dir", project_dir],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace",
-            env=env,
-        )
+        # Progress file for polling sweep progress from subprocess
+        progress_file = os.path.join(run_dir, f"sweep_progress_step{step}.json")
+        if os.path.exists(progress_file):
+            os.remove(progress_file)
 
+        step_output_dir = os.path.join(project_dir, f"sweep_step{step}")
+        os.makedirs(step_output_dir, exist_ok=True)
+
+        log_file = os.path.join(run_dir, f"sweep_log_step{step}.txt")
+        with open(log_file, "w", encoding="utf-8") as lf:
+            proc = subprocess.Popen(
+                [sys.executable, sweep_script,
+                 "--csv", request_csv,
+                 "--config", cfg_path,
+                 "--project", aedt_path,
+                 "--design", dsgn_name,
+                 "--output-dir", step_output_dir,
+                 "--progress-file", progress_file],
+                stdout=lf, stderr=lf,
+                env=env,
+            )
+
+        last_progress_reported = ""
         while proc.poll() is None:
             if self._abort:
                 self._terminate_process_tree(proc)
                 raise RuntimeError("Simulation aborted by user")
-            time.sleep(0.2)
 
-        stdout, stderr = proc.communicate()
+            # Poll progress file for lifecycle events
+            try:
+                if os.path.exists(progress_file):
+                    with open(progress_file, "r", encoding="utf-8") as pf:
+                        data = json.load(pf)
+                    status = data.get("status", "")
+                    if status != last_progress_reported:
+                        last_progress_reported = status
+                        if status == "running":
+                            self.sweep_progress_signal.emit("started", 0)
+                            self._log("  Sweep running...")
+                        elif status == "completed":
+                            self.sweep_progress_signal.emit("completed", 1)
+                            self._log("  Sweep completed")
+                        elif status == "failed":
+                            error = data.get("error", "unknown")
+                            self.sweep_progress_signal.emit("failed", 0)
+                            self._log(f"  Sweep failed: {error}")
+            except Exception:
+                pass
+
+            time.sleep(0.5)
+
+        proc.wait()
         if proc.returncode != 0:
-            err = stderr.replace("\ufffd", "?")[:2000]
-            self._log(f"  Simulation failed:\n{err}")
+            try:
+                with open(log_file, "r", encoding="utf-8") as lf:
+                    log_content = lf.read()[-3000:]
+                self._log(f"  Simulation failed (see {log_file}):\n{log_content}")
+            except Exception:
+                self._log(f"  Simulation failed (log: {log_file})")
             raise RuntimeError("maxwell_sweep.py failed")
 
-        output_csv = os.path.join(project_dir, "Force Plot 1.csv")
-        if os.path.exists(output_csv):
-            size = os.path.getsize(output_csv)
-            self._log(f"  Exported: {output_csv} ({size} bytes)")
+        step_output_dir = os.path.join(project_dir, f"sweep_step{step}")
+        output_csv = None
+        for fname in os.listdir(step_output_dir):
+            if fname.endswith(".csv") and fname != "ParametricSetup1_Table.csv":
+                fpath = os.path.join(step_output_dir, fname)
+                if os.path.getsize(fpath) > 0:
+                    output_csv = fpath
+                    break
 
-            import shutil
-            raw_dir = os.path.join(run_dir, "raw_outputs")
-            os.makedirs(raw_dir, exist_ok=True)
-            dest = os.path.join(raw_dir, f"step{step}_force_timeseries.csv")
-            shutil.copy2(output_csv, dest)
-            self._log(f"  Saved raw timeseries: {dest}")
-            return output_csv
-        raise RuntimeError("Simulation result file not found")
+        if not output_csv:
+            raise RuntimeError("Simulation result file not found")
+
+        size = os.path.getsize(output_csv)
+        self._log(f"  Exported: {output_csv} ({size} bytes)")
+
+        import shutil
+        raw_dir = os.path.join(run_dir, "raw_outputs", f"step_{step:03d}")
+        os.makedirs(raw_dir, exist_ok=True)
+        dest = os.path.join(raw_dir, "force_timeseries.csv")
+        shutil.copy2(output_csv, dest)
+        self._log(f"  Saved raw timeseries: {dest}")
+        return output_csv
 
     def _terminate_process_tree(self, proc):
         try:
@@ -238,6 +286,23 @@ class HUDSWorker(QThread):
         out_names = sorted(detected_outputs) if detected_outputs else ["peak_force_y", "peak_force_z"]
         self._log(f"  Detected outputs: {out_names}")
 
+        # Check time series length consistency: only keep samples whose effective data length
+        # matches the maximum length across all samples. Skip shorter (incomplete) ones.
+        col_valid_lengths = {}
+        for col, (clean_prefix, vars_in_col) in col_var_map.items():
+            valid_count = int(pd.to_numeric(df[col], errors="coerce").notna().sum())
+            col_valid_lengths[col] = valid_count
+        max_length = max(col_valid_lengths.values()) if col_valid_lengths else 0
+        valid_cols = {col for col, length in col_valid_lengths.items() if length == max_length}
+        invalid_cols = {col for col, length in col_valid_lengths.items() if length < max_length}
+
+        if invalid_cols:
+            self._log(
+                f"  Warning: {len(invalid_cols)} sample(s) have incomplete time series data "
+                f"(length < {max_length}). These will be skipped and remain in the candidate pool."
+            )
+
+        skipped_ids = set()
         label_rows = []
         for _, req_row in request_df.iterrows():
             req_vals = {}
@@ -248,6 +313,29 @@ class HUDSWorker(QThread):
                         req_vals[vn] = float(raw)
                     except ValueError:
                         req_vals[vn] = raw
+
+            # Find matching columns for this request row
+            matched_col = None
+            for col, (clean_prefix, vars_in_col) in col_var_map.items():
+                match = True
+                for vn in var_names:
+                    if vn not in vars_in_col or vn not in req_vals:
+                        match = False
+                        break
+                    if isinstance(vars_in_col[vn], float) and isinstance(req_vals[vn], float):
+                        if abs(vars_in_col[vn] - req_vals[vn]) > 1e-6:
+                            match = False
+                    else:
+                        if str(vars_in_col[vn]) != str(req_vals[vn]):
+                            match = False
+                if match:
+                    matched_col = col
+                    break
+
+            # Skip samples with incomplete time series data
+            if matched_col and matched_col not in valid_cols:
+                skipped_ids.add(req_row[SAMPLE_ID_COLUMN])
+                continue
 
             row_data = {SAMPLE_ID_COLUMN: req_row[SAMPLE_ID_COLUMN]}
             for vn in var_names:
@@ -280,10 +368,10 @@ class HUDSWorker(QThread):
             label_rows.append(row_data)
 
         if not label_rows:
-            raise RuntimeError("Could not extract data from simulation results")
+            raise RuntimeError("All samples have incomplete time series data. No valid data available.")
 
         merged = pd.DataFrame(label_rows)
         cols = [SAMPLE_ID_COLUMN] + var_names + out_names
         label_path = os.path.join(run_dir, "data", f"step{step}_labels.csv")
         write_csv(merged[cols], label_path)
-        return label_path, out_names
+        return label_path, out_names, skipped_ids

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 from pathlib import Path
 from typing import List
 
@@ -18,6 +19,39 @@ from huds_app.data.schema import (
     validate_values,
 )
 from huds_app.core.storage import RunState, _normalize_sample_id, append_csv, ensure_run_dir, read_csv, write_csv
+
+
+def _filter_invalid_rows(df: pd.DataFrame, output_columns: list[str]) -> tuple[pd.DataFrame, set]:
+    """Filter out rows with missing/non-numeric/infinite values in output columns.
+
+    Returns (filtered_df, set_of_skipped_normalized_sample_ids).
+    Rows are kept only if ALL output columns have finite numeric values.
+    """
+    if df.empty or not output_columns:
+        return df, set()
+
+    valid_mask = pd.Series(True, index=df.index)
+    for col in output_columns:
+        if col not in df.columns:
+            # Column missing entirely -- all rows are invalid
+            valid_mask &= False
+            continue
+        values = df[col]
+        numeric_values = pd.to_numeric(values, errors="coerce")
+        finite_mask = np.isfinite(numeric_values.to_numpy(dtype=float, na_value=np.nan))
+        valid_mask &= pd.Series(finite_mask, index=df.index)
+
+    skipped_df = df[~valid_mask]
+    kept_df = df[valid_mask].copy()
+
+    skipped_ids = set()
+    if not skipped_df.empty and SAMPLE_ID_COLUMN in skipped_df.columns:
+        skipped_ids = {
+            _normalize_sample_id(sid)
+            for sid in skipped_df[SAMPLE_ID_COLUMN].dropna().tolist()
+        }
+
+    return kept_df, skipped_ids
 
 _REQUEST_IDS_BY_CONFIG: dict[int, set[object]] = {}
 
@@ -141,6 +175,7 @@ def import_labels(
     input_path: str | Path,
     overwrite: bool = False,
     allow_partial: bool = False,
+    skipped_ids: set | None = None,
 ) -> int:
     """Import simulator output labels and route to train/val/test sets.
 
@@ -163,11 +198,46 @@ def import_labels(
     _register_request_ids(config, request_df, replace=True)
 
     simulator_df = read_csv(input_path)
-    errors = validate_simulator_output(simulator_df, config)
-    if errors:
-        raise ValueError("Invalid simulator output: " + "; ".join(errors))
 
-    labeled_df = simulator_df[_labeled_columns(config)].copy()
+    # Filter out rows with missing/non-numeric/infinite values in output columns
+    output_columns = list(config.model.output_names)
+    filtered_simulator_df, internal_skipped_ids = _filter_invalid_rows(simulator_df, output_columns)
+
+    # Merge skipped IDs from upstream (time series length check) and internal validation
+    if skipped_ids is not None:
+        internal_skipped_ids |= {
+            _normalize_sample_id(sid) for sid in skipped_ids
+        }
+
+    if internal_skipped_ids:
+        print(
+            f"  Warning: {len(internal_skipped_ids)} sample(s) skipped due to missing or invalid output data. "
+            f"These samples will remain in the candidate pool: {sorted(internal_skipped_ids)}"
+        )
+
+    if filtered_simulator_df.empty:
+        raise ValueError(
+            "All simulator output rows contain missing or invalid values. "
+            "No valid data available for import."
+        )
+
+    # Validate only structural/schema issues on filtered data (not value-level, already filtered)
+    schema_errors = []
+    required_columns = _labeled_columns(config)
+    for column in validate_schema(filtered_simulator_df, simulator_output):
+        schema_errors.append(f"Missing required column: {column}")
+    missing_columns = [column for column in required_columns if column not in filtered_simulator_df.columns]
+    for column in missing_columns:
+        if column != SAMPLE_ID_COLUMN:
+            schema_errors.append(f"Missing required column: {column}")
+    if SAMPLE_ID_COLUMN in filtered_simulator_df.columns:
+        duplicate_values = _duplicate_values(_column(filtered_simulator_df, SAMPLE_ID_COLUMN))
+        if duplicate_values:
+            schema_errors.append(f"Column {SAMPLE_ID_COLUMN} contains duplicate id(s): {duplicate_values}")
+    if schema_errors:
+        raise ValueError("Invalid simulator output: " + "; ".join(schema_errors))
+
+    labeled_df = filtered_simulator_df[_labeled_columns(config)].copy()
     incoming_ids = {_normalize_sample_id(sid) for sid in _column(labeled_df, SAMPLE_ID_COLUMN).tolist()}
     step_key = str(int(step))
     requested_ids = {_normalize_sample_id(sid) for sid in _column(request_df, SAMPLE_ID_COLUMN).tolist()}
@@ -184,8 +254,10 @@ def import_labels(
         )
 
     # --- 3. Validate completeness BEFORE any file writes ---
+    # Skipped IDs (invalid data) count as "handled" so they do not trigger incompleteness
+    combined_incoming = incoming_ids | internal_skipped_ids
     pending_missing = _validate_import_completeness(
-        requested_ids, existing_labeled_ids, incoming_ids, allow_partial, step_key
+        requested_ids, existing_labeled_ids, combined_incoming, allow_partial, step_key
     )
 
     # --- 4. Route labeled data by split assignment ---
@@ -218,6 +290,9 @@ def import_labels(
         remove_set = requested_ids
     else:
         remove_set = requested_ids - pending_missing
+
+    # Keep skipped (invalid data) samples in the candidate pool for retry
+    remove_set -= internal_skipped_ids
 
     state.pending_sample_ids = [
         sid for sid in state.pending_sample_ids if sid not in remove_set

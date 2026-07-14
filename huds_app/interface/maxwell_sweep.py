@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import time
@@ -261,16 +262,68 @@ def import_parametric_csv(oDesign, csv_path, setup_name="ParametricSetup1"):
     return oOpti
 
 
-def run_parametric_sweep(oOpti, setup_name="ParametricSetup1"):
-    """运行参数扫描"""
+def run_parametric_sweep(oOpti, setup_name="ParametricSetup1", progress_cb=None, progress_file=None):
+    """运行参数扫描(同步),支持生命周期回调.
+
+    Args:
+        oOpti: Optimetrics module object
+        setup_name: Setup name
+        progress_cb: Optional callback with lifecycle events:
+            ("started", total=0) on entry
+            ("completed", total=1) on success
+            ("failed", error_msg) on exception
+        progress_file: Optional file path to write JSON progress for external polling
+    """
     print(f"\n正在启动参数扫描: {setup_name}")
     print("（此过程可能需要较长时间，请耐心等待...）")
 
     start_time = time.time()
-    oOpti.SolveSetup(setup_name)
-    elapsed = time.time() - start_time
 
-    print(f"参数扫描完成，耗时 {elapsed:.1f} 秒")
+    # Signal started
+    if progress_cb:
+        progress_cb("started", 0)
+    if progress_file:
+        try:
+            tmp_file = progress_file + ".tmp"
+            with open(tmp_file, "w", encoding="utf-8") as pf:
+                json.dump({"status": "running", "done": 0, "total": 0, "failed": 0}, pf)
+            os.replace(tmp_file, progress_file)
+        except Exception:
+            pass
+
+    try:
+        oOpti.SolveSetup(setup_name)
+        elapsed = time.time() - start_time
+        print(f"参数扫描完成，耗时 {elapsed:.1f} 秒")
+
+        # Signal completed
+        if progress_cb:
+            progress_cb("completed", 1)
+        if progress_file:
+            try:
+                tmp_file = progress_file + ".tmp"
+                with open(tmp_file, "w", encoding="utf-8") as pf:
+                    json.dump({"status": "completed", "done": 1, "total": 1, "failed": 0}, pf)
+                os.replace(tmp_file, progress_file)
+            except Exception:
+                pass
+    except Exception as e:
+        elapsed = time.time() - start_time
+        print(f"参数扫描失败 ({elapsed:.1f} 秒): {e}")
+
+        # Signal failed
+        if progress_cb:
+            progress_cb("failed", str(e))
+        if progress_file:
+            try:
+                tmp_file = progress_file + ".tmp"
+                with open(tmp_file, "w", encoding="utf-8") as pf:
+                    json.dump({"status": "failed", "error": str(e)}, pf)
+                os.replace(tmp_file, progress_file)
+            except Exception:
+                pass
+
+        raise
 
 
 def check_sweep_status(oOpti, setup_name="ParametricSetup1"):
@@ -319,8 +372,18 @@ def cleanup_results(oDesign):
         print(f"清理跳过 (无旧数据或失败): {e}")
 
 
-def run_sweep(csv_path, config_path=None, project_path=None, design_name=None, output_dir=None):
-    """非交互式运行参数扫描 - 供 HUDS 调用"""
+def run_sweep(csv_path, config_path=None, project_path=None, design_name=None, output_dir=None, progress_cb=None, progress_file=None):
+    """非交互式运行参数扫描 - 供 HUDS 调用
+
+    Args:
+        csv_path: Request CSV path
+        config_path: HUDS config.json path
+        project_path: AEDT project file or directory
+        design_name: Design name
+        output_dir: Output directory for exported results
+        progress_cb: Optional callback (done, total, failed, statuses) -> None for real-time progress
+        progress_file: Optional file path to write JSON progress for external polling
+    """
     os.environ["ANSYSLMD_LICENSE_FILE"] = "24500@licensing.hkust.edu.cn"
 
     oDesktop, oApp = connect_aedt()
@@ -356,7 +419,7 @@ def run_sweep(csv_path, config_path=None, project_path=None, design_name=None, o
     setup_name = "ParametricSetup1"
     oOpti = import_parametric_csv(oDesign, maxwell_csv, setup_name)
 
-    run_parametric_sweep(oOpti, setup_name)
+    run_parametric_sweep(oOpti, setup_name, progress_cb=progress_cb, progress_file=progress_file)
 
     has_result = check_sweep_status(oOpti, setup_name)
     print(f"\n扫描结果状态: {'有结果' if has_result else '无结果'}")
@@ -379,6 +442,7 @@ def main():
     parser.add_argument("--project", type=str, default=None, help="项目文件路径 (默认: 脚本目录下优化模型1.aedt)")
     parser.add_argument("--design", type=str, default="ly2", help="设计名称")
     parser.add_argument("--output-dir", type=str, help="输出目录")
+    parser.add_argument("--progress-file", type=str, default=None, help="进度文件路径 (JSON)")
     parser.add_argument("--interactive", action="store_true", help="交互式模式")
 
     args = parser.parse_args()
@@ -390,6 +454,7 @@ def main():
             project_path=args.project,
             design_name=args.design,
             output_dir=args.output_dir or os.path.dirname(args.project),
+            progress_file=args.progress_file,
         )
         print(f"\n流程完成！导出了 {len(exported)} 个文件")
         return
@@ -446,7 +511,7 @@ def _run_interactive():
         if not sf:
             print("启用 SaveFields，需要重新运行扫描...")
             setup_obj.SetPropValue("SaveFields", True)
-            run_parametric_sweep(oOpti, setup_name)
+    run_parametric_sweep(oOpti, setup_name, progress_cb=None, progress_file=None)
 
     output_dir = os.path.dirname(project_path)
     print(f"\n结果将导出到: {output_dir}")

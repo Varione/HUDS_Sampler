@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QProgressBar,
     QTextBrowser,
+    QMessageBox,
 )
 
 
@@ -29,9 +30,22 @@ class MonitorPage(QWizardPage):
         step_layout.addWidget(self.step_label, 1)
         layout.addLayout(step_layout)
 
+        # Overall training progress
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
+
+        # Sweep progress (per-solution)
+        sweep_layout = QHBoxLayout()
+        sweep_layout.addWidget(QLabel("仿真进度:"))
+        self.sweep_progress_label = QLabel("等待中")
+        self.sweep_progress_label.setStyleSheet("color: gray;")
+        sweep_layout.addWidget(self.sweep_progress_label, 1)
+        self.sweep_progress_bar = QProgressBar()
+        self.sweep_progress_bar.setValue(0)
+        self.sweep_progress_bar.setFixedHeight(22)
+        sweep_layout.addWidget(self.sweep_progress_bar, 3)
+        layout.addLayout(sweep_layout)
 
         self.log_browser = QTextBrowser()
         self.log_browser.setMinimumHeight(300)
@@ -48,6 +62,17 @@ class MonitorPage(QWizardPage):
         layout.addLayout(btn_layout)
 
     def _start_training(self):
+        self.log_browser.append("Initializing training...")
+        try:
+            self._start_training_impl()
+        except Exception as exc:
+            message = f"Training startup failed: {exc}"
+            self.log_browser.append(message)
+            QMessageBox.critical(self, "Training startup failed", message)
+            self.start_btn.setEnabled(True)
+            self.abort_btn.setEnabled(False)
+
+    def _start_training_impl(self):
         from gui_wizard.worker import HUDSWorker
 
         wizard = self.window()
@@ -87,6 +112,7 @@ class MonitorPage(QWizardPage):
         self._worker.step_signal.connect(self.step_label.setText)
         self._worker.r2_signal.connect(self._on_r2)
         self._worker.finished_signal.connect(self._on_finished)
+        self._worker.sweep_progress_signal.connect(self._on_sweep_progress)
 
         self.start_btn.setEnabled(False)
         self.abort_btn.setEnabled(True)
@@ -103,6 +129,22 @@ class MonitorPage(QWizardPage):
         r2_history.append(r2_val)
         wizard.setProperty("r2_history", r2_history)
 
+    def _on_sweep_progress(self, event_type, data):
+        if event_type == "started":
+            self.sweep_progress_bar.setRange(0, 0)
+            self.sweep_progress_label.setText("仿真运行中...")
+            self.sweep_progress_label.setStyleSheet("color: blue;")
+        elif event_type == "completed":
+            self.sweep_progress_bar.setRange(0, 100)
+            self.sweep_progress_bar.setValue(100)
+            self.sweep_progress_label.setText("仿真完成")
+            self.sweep_progress_label.setStyleSheet("color: green;")
+        elif event_type == "failed":
+            self.sweep_progress_bar.setRange(0, 100)
+            self.sweep_progress_bar.setValue(0)
+            self.sweep_progress_label.setText(f"仿真失败: {data}")
+            self.sweep_progress_label.setStyleSheet("color: red;")
+
     def _on_finished(self, success, message):
         self.start_btn.setEnabled(True)
         self.abort_btn.setEnabled(False)
@@ -118,3 +160,6 @@ class MonitorPage(QWizardPage):
         self.progress_bar.setValue(0)
         self.step_label.setText("未开始")
         self.log_browser.clear()
+        self.sweep_progress_bar.setValue(0)
+        self.sweep_progress_label.setText("等待中")
+        self.sweep_progress_label.setStyleSheet("color: gray;")

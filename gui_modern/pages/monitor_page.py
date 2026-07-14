@@ -49,6 +49,16 @@ class MonitorPage(QWidget):
         progress_container.layout.addWidget(self.progress_bar)
         layout.addWidget(progress_container)
 
+        # Sweep progress
+        sweep_container = ProgressCard()
+        self.sweep_label = QLabel("Sweep: waiting")
+        self.sweep_label.setStyleSheet("color: gray; font-size: 13px;")
+        self.sweep_progress_bar = QProgressBar()
+        self.sweep_progress_bar.setValue(0)
+        sweep_container.layout.addWidget(self.sweep_label)
+        sweep_container.layout.addWidget(self.sweep_progress_bar)
+        layout.addWidget(sweep_container)
+
         log_container = LogCard()
         self.log_browser = QTextBrowser()
         self.log_browser.setFontFamily("Consolas, Courier New, monospace")
@@ -97,9 +107,13 @@ class MonitorPage(QWidget):
         self.worker.step_done_signal.connect(self._on_step_done)
         self.worker.finished_all_signal.connect(self._on_finished)
         self.worker.error_signal.connect(self._on_error)
+        self.worker.sweep_progress_signal.connect(self._on_sweep_progress)
 
         self.start_btn.setEnabled(False)
         self.abort_btn.setEnabled(True)
+        self.sweep_progress_bar.setValue(0)
+        self.sweep_label.setText("Sweep: waiting")
+        self.sweep_label.setStyleSheet("color: gray; font-size: 13px;")
         self.worker.start()
 
     def _abort_workflow(self):
@@ -111,6 +125,22 @@ class MonitorPage(QWidget):
     def _on_progress(self, value):
         self.progress_bar.setValue(value)
         self.progress_label.setText(f"Progress: {value}%")
+
+    def _on_sweep_progress(self, event_type, data):
+        if event_type == "started":
+            self.sweep_progress_bar.setRange(0, 0)
+            self.sweep_label.setText("仿真运行中...")
+            self.sweep_label.setStyleSheet("color: blue; font-size: 13px;")
+        elif event_type == "completed":
+            self.sweep_progress_bar.setRange(0, 100)
+            self.sweep_progress_bar.setValue(100)
+            self.sweep_label.setText("仿真完成")
+            self.sweep_label.setStyleSheet("color: green; font-size: 13px;")
+        elif event_type == "failed":
+            self.sweep_progress_bar.setRange(0, 100)
+            self.sweep_progress_bar.setValue(0)
+            self.sweep_label.setText(f"仿真失败: {data}")
+            self.sweep_label.setStyleSheet("color: red; font-size: 13px;")
 
     def _on_step_done(self, step, metrics):
         self._log(f"Step {step} completed.")
