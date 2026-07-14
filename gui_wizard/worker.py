@@ -155,45 +155,20 @@ class HUDSWorker(QThread):
 
     def _run_maxwell_sweep(self, request_csv, cfg_path, step):
         self.log("  运行 Maxwell 仿真...")
-        env = os.environ.copy()
-        env["ANSYSLMD_LICENSE_FILE"] = "24500@licensing.hkust.edu.cn"
-        env["PYTHONPATH"] = PROJECT_ROOT + ";" + env.get("PYTHONPATH", "")
-        sweep_script = os.path.join(
-            PROJECT_ROOT, "huds_app", "interface", "maxwell_sweep.py"
+        os.environ["ANSYSLMD_LICENSE_FILE"] = "24500@licensing.hkust.edu.cn"
+
+        project_dir = os.path.dirname(self.aedt_path) if os.path.isfile(self.aedt_path) else self.aedt_path
+
+        from huds_app.interface.maxwell_sweep import run_sweep
+        exported = run_sweep(
+            csv_path=request_csv,
+            config_path=cfg_path,
+            project_path=self.aedt_path,
+            design_name=self.design_name,
+            output_dir=project_dir,
         )
 
-        import subprocess
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                sweep_script,
-                "--csv",
-                request_csv,
-                "--config",
-                cfg_path,
-                "--project",
-                self.aedt_path,
-                "--design",
-                self.design_name,
-                "--output-dir",
-                os.path.dirname(self.aedt_path) if os.path.isfile(self.aedt_path) else self.aedt_path,
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=600,
-            env=env,
-        )
-
-        if result.returncode != 0:
-            err = result.stderr.replace("\ufffd", "?")[:2000]
-            self.log(f"  仿真失败:\n{err}")
-            out = result.stdout.replace("\ufffd", "?")[:1000]
-            if out:
-                self.log(f"  输出:\n{out}")
-            raise RuntimeError("maxwell_sweep.py failed")
+        self.log(f"  仿真完成，导出了 {len(exported)} 个文件")
 
         project_dir = os.path.dirname(self.aedt_path) if os.path.isfile(self.aedt_path) else self.aedt_path
         output_csv = os.path.join(project_dir, "Force Plot 1.csv")
@@ -217,51 +192,95 @@ class HUDSWorker(QThread):
         df = pd.read_csv(force_csv)
         request_df = read_csv(request_path)
 
-        var_name = cfg.variables[0].name if cfg.variables else "v"
+        var_names = [v.name for v in cfg.variables] if cfg.variables else []
         steady_pct = getattr(cfg, "steady_state_pct", 0.2)
 
+        import re
+        kv_pattern = re.compile(r"(\w+)='([^']+)'")
+
+        def parse_col_vars(col_name):
+            matches = kv_pattern.findall(col_name)
+            result = {}
+            for k, v in matches:
+                clean = v.replace("km_per_hour", "").replace("Hz", "").replace("A", "")
+                try:
+                    result[k] = float(clean)
+                except ValueError:
+                    result[k] = clean
+            return result
+
         detected_outputs = set()
+        col_var_map = {}
         for col in df.columns[1:]:
-            if f"{var_name}='" not in col:
+            vars_in_col = parse_col_vars(col)
+            if not vars_in_col:
                 continue
-            prefix = col.rsplit(f" - {var_name}='", 1)[0]
-            detected_outputs.add(prefix)
+            prefix = col.rsplit(" - ", 1)[0] if " - " in col else col.split("[")[0].strip()
+            clean_prefix = re.sub(r'\s*\[.*?\]', '', prefix).strip()
+            detected_outputs.add(clean_prefix)
+            col_var_map[col] = (clean_prefix, vars_in_col)
 
         out_names = sorted(detected_outputs) if detected_outputs else ["peak_force_y", "peak_force_z"]
         self.log(f"  检测到输出: {out_names}")
         self.log(f"  稳态值提取: 末尾 {steady_pct * 100:.0f}% 数据均值")
 
-        force_data = []
-        for col in df.columns[1:]:
-            if f"{var_name}='" not in col:
-                continue
-            v_str = col.split(f"{var_name}='")[1].split("'")[0]
-            v_val = float(v_str.replace("km_per_hour", ""))
+        self.log(f"  请求表变量: {var_names}")
+        self.log(f"  请求表行数: {len(request_df)}")
+        self.log(f"  仿真结果列数: {len(df.columns)-1}")
 
-            n_total = len(df[col])
-            n_steady = max(1, int(n_total * steady_pct))
-            steady_mean = df[col].iloc[-n_steady:].mean()
+        label_rows = []
+        for _, req_row in request_df.iterrows():
+            req_vals = {}
+            for vn in var_names:
+                if vn in req_row.index:
+                    raw = str(req_row[vn]).replace("km_per_hour", "").replace("Hz", "").replace("A", "")
+                    try:
+                        req_vals[vn] = float(raw)
+                    except ValueError:
+                        req_vals[vn] = raw
 
-            prefix = col.rsplit(f" - {var_name}='", 1)[0]
-            force_data.append({
-                "v_rounded": round(v_val, 4),
-                "value": steady_mean,
-                "output_name": prefix,
-            })
+            row_data = {SAMPLE_ID_COLUMN: req_row[SAMPLE_ID_COLUMN]}
+            for vn in var_names:
+                if vn in req_row.index:
+                    row_data[vn] = req_row[vn]
 
-        if not force_data:
+            matched_outputs = {}
+            for col, (clean_prefix, vars_in_col) in col_var_map.items():
+                match = True
+                for vn in var_names:
+                    if vn not in vars_in_col or vn not in req_vals:
+                        match = False
+                        break
+                    if isinstance(vars_in_col[vn], float) and isinstance(req_vals[vn], float):
+                        if abs(vars_in_col[vn] - req_vals[vn]) > 1e-6:
+                            match = False
+                    else:
+                        if str(vars_in_col[vn]) != str(req_vals[vn]):
+                            match = False
+
+                if not match:
+                    continue
+
+                n_total = len(df[col])
+                n_steady = max(1, int(n_total * steady_pct))
+                steady_mean = df[col].iloc[-n_steady:].mean()
+                matched_outputs[clean_prefix] = steady_mean
+
+            row_data.update(matched_outputs)
+            label_rows.append(row_data)
+
+        self.log(f"  匹配到 {len(label_rows)} 行, 每行 {len(label_rows[0]) if label_rows else 0} 列")
+
+        if not label_rows:
             raise RuntimeError("未能从仿真结果中提取任何数据")
 
-        force_df = pd.DataFrame(force_data)
-        pivoted = force_df.pivot(
-            index="v_rounded", columns="output_name", values="value"
-        ).reset_index()
+        has_outputs = any(any(k in out_names and v is not None for k, v in r.items()) for r in label_rows)
+        if not has_outputs:
+            raise RuntimeError("仿真结果与请求表变量不匹配，请检查变量名和单位")
 
-        merged = request_df.copy()
-        merged["v_rounded"] = merged[var_name].round(4)
-        merged = merged.merge(pivoted, on="v_rounded", how="left")
-        merged = merged.drop(columns=["v_rounded"])
+        merged = pd.DataFrame(label_rows)
 
         label_path = os.path.join(self.run_dir, "data", f"step{step}_labels.csv")
-        write_csv(merged[[SAMPLE_ID_COLUMN, var_name] + out_names], label_path)
+        cols = [SAMPLE_ID_COLUMN] + var_names + out_names
+        write_csv(merged[cols], label_path)
         return label_path, out_names

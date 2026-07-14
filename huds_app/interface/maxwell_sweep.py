@@ -6,8 +6,18 @@ import argparse
 from win32com.client import Dispatch
 
 # 设置控制台编码
-if sys.platform == 'win32':
+if sys.platform == 'win32' and sys.stdout is not None:
     sys.stdout.reconfigure(encoding='utf-8')
+def _match_aedt_file(aedt_files, base_dir):
+    """Match correct .aedt file when multiple exist in directory."""
+    if len(aedt_files) == 1:
+        return aedt_files[0]
+    # Try matching by directory name (project folder)
+    dir_name = os.path.basename(os.path.normpath(base_dir))
+    for f in aedt_files:
+        if f.startswith(dir_name):
+            return f
+    return aedt_files[0]
 
 
 def find_aedt_registry():
@@ -177,7 +187,9 @@ def open_project(oDesktop, project_path):
         aedt_files = [f for f in os.listdir(project_path) if f.endswith('.aedt')]
         if not aedt_files:
             raise FileNotFoundError(f"No .aedt file found in: {project_path}")
-        project_path = os.path.join(project_path, aedt_files[0])
+        # Match by project name if multiple files exist
+        matched = _match_aedt_file(aedt_files, project_path)
+        project_path = os.path.join(project_path, matched)
 
     lock_file = project_path + ".lock"
     if os.path.exists(lock_file):

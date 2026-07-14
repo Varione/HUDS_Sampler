@@ -12,6 +12,24 @@ from PyQt5.QtWidgets import (
 )
 
 
+def _match_aedt_by_project(aedt_files, oProject):
+    """Match .aedt file to project name when multiple files exist in directory."""
+    if len(aedt_files) == 1:
+        return aedt_files[0]
+    proj_name = ""
+    if oProject:
+        try:
+            proj_name = oProject.GetName()
+        except Exception:
+            pass
+    if proj_name:
+        for af in aedt_files:
+            base = os.path.splitext(os.path.basename(af))[0]
+            if base == proj_name:
+                return af
+    return aedt_files[0] if aedt_files else None
+
+
 class AEDTPage(QWizardPage):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -210,6 +228,7 @@ class AEDTPage(QWizardPage):
             return
         design_item = self.design_list.item(row)
         design_name = design_item.text()
+        print(f"[AEDT] Design selected: {design_name}")
 
         # Try COM connection first
         if self._oProject:
@@ -223,22 +242,65 @@ class AEDTPage(QWizardPage):
         if not aedt_path and self._oProject:
             try:
                 aedt_path = self._oProject.GetPath()
-            except Exception:
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"获取项目路径失败: {e}")
                 pass
         
+        # Ensure aedt_path points to .aedt file, not directory
+        if aedt_path and os.path.isdir(aedt_path):
+            import glob as g
+            aedt_files = g.glob(os.path.join(aedt_path, '*.aedt'))
+            if len(aedt_files) == 1:
+                aedt_path = aedt_files[0]
+            elif len(aedt_files) > 1:
+                # Match by project name to avoid picking wrong file
+                proj_name = ""
+                try:
+                    proj_name = self._oProject.GetName()
+                except Exception:
+                    pass
+                matched = []
+                if proj_name:
+                    for af in aedt_files:
+                        base = os.path.splitext(os.path.basename(af))[0]
+                        if base == proj_name:
+                            matched.append(af)
+                if matched:
+                    aedt_path = matched[0]
+                else:
+                    aedt_path = aedt_files[0]
+                    print(f"[AEDT] No exact name match for '{proj_name}', using first file")
+            else:
+                QMessageBox.warning(self, "调试",
+                    f"目录 {aedt_path} 中未找到 .aedt 文件")
+        
         if aedt_path:
-            from huds_app.utils.aedt_parser import parse_aedt_variables, parse_aedt_outputs
-            vars = parse_aedt_variables(aedt_path, design_name)
-            outputs = parse_aedt_outputs(aedt_path, design_name)
-            wizard = self.window()
-            wizard.setProperty("detected_variables", vars)
-            wizard.setProperty("detected_outputs", outputs)
-            print(f"[AEDT] Detected {len(vars)} variables for design '{design_name}':")
-            for v in vars:
-                print(f"  {v['name']}: default={v.get('default', 'N/A')}, unit={v.get('unit', 'N/A')}")
-            print(f"[AEDT] Detected {len(outputs)} outputs:")
-            for o in outputs:
-                print(f"  {o['name']} ({o.get('type', 'N/A')})")
+            # Debug: show path info
+            is_file = os.path.isfile(aedt_path)
+            is_dir = os.path.isdir(aedt_path)
+            debug_info = (f"AEDT路径: {aedt_path}\n"
+                         f"是文件: {is_file}\n"
+                         f"是目录: {is_dir}\n"
+                         f"Design名称: {design_name}")
+            QMessageBox.information(self, "调试-路径信息", debug_info)
+            
+            try:
+                from huds_app.utils.aedt_parser import parse_aedt_variables, parse_aedt_outputs
+                vars = parse_aedt_variables(aedt_path, design_name)
+                outputs = parse_aedt_outputs(aedt_path, design_name)
+                wizard = self.window()
+                wizard.setProperty("detected_variables", vars)
+                wizard.setProperty("detected_outputs", outputs)
+                QMessageBox.information(self, "检测结果", 
+                    f"检测到 {len(vars)} 个变量: {[v['name'] for v in vars]}\n"
+                    f"检测到 {len(outputs)} 个输出: {[o['name'] for o in outputs]}")
+            except Exception as e:
+                import traceback
+                QMessageBox.critical(self, "解析错误", 
+                    f"变量/输出检测失败:\n{str(e)}\n\n{traceback.format_exc()[:500]}")
+        else:
+            QMessageBox.warning(self, "调试", 
+                f"未找到 .aedt 路径\nfile_path={getattr(self, '_aedt_file_path', 'NOT SET')}\nhas_project={self._oProject is not None}")
 
     def initializePage(self):
         config = self.window().property("config")
@@ -263,7 +325,15 @@ class AEDTPage(QWizardPage):
             wizard.setProperty("aedt_path", self._aedt_file_path)
         elif self._oProject:
             try:
-                wizard.setProperty("aedt_path", self._oProject.GetPath())
+                path = self._oProject.GetPath()
+                # Resolve directory to correct .aedt file using project name
+                if os.path.isdir(path):
+                    import glob as g
+                    aedt_files = g.glob(os.path.join(path, "*.aedt"))
+                    matched = _match_aedt_by_project(aedt_files, self._oProject)
+                    if matched:
+                        path = matched
+                wizard.setProperty("aedt_path", path)
             except Exception:
                 pass
         

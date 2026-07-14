@@ -137,8 +137,10 @@ class ConfigPage(QWizardPage):
         layout.addStretch()
 
     def _auto_fill_outputs(self):
-        detected = self.window().property("detected_outputs") or []
+        wizard = self.window()
+        detected = wizard.property("detected_outputs") or []
         if not detected:
+            QMessageBox.information(self, "调试", f"未检测到输出变量。\nWizard属性: {list(wizard.dynamicPropertyNames())}")
             return
         
         self.output_table.setRowCount(len(detected))
@@ -161,8 +163,10 @@ class ConfigPage(QWizardPage):
             self.output_table.setItem(i, 2, type_item)
 
     def _auto_fill_variables(self):
-        detected = self.window().property("detected_variables") or []
+        wizard = self.window()
+        detected = wizard.property("detected_variables") or []
         if not detected:
+            QMessageBox.information(self, "调试", f"未检测到设计变量。\nWizard属性: {list(wizard.dynamicPropertyNames())}")
             return
         
         self.var_table.setRowCount(len(detected))
@@ -195,11 +199,18 @@ class ConfigPage(QWizardPage):
             self.var_table.setItem(i, 5, unit_item)
     
     def initializePage(self):
-        detected_vars = self.window().property("detected_variables") or []
+        wizard = self.window()
+        if not wizard:
+            print("[ConfigPage] No wizard window found")
+            return
+        
+        detected_vars = wizard.property("detected_variables") or []
+        print(f"[ConfigPage] Detected variables: {len(detected_vars)}")
         if detected_vars:
             self._auto_fill_variables()
         
-        detected_outputs = self.window().property("detected_outputs") or []
+        detected_outputs = wizard.property("detected_outputs") or []
+        print(f"[ConfigPage] Detected outputs: {len(detected_outputs)}")
         if detected_outputs:
             self._auto_fill_outputs()
     

@@ -1,11 +1,32 @@
+import os
+
 from PyQt5.QtCore import QObject, pyqtSignal
 from PyQt5.QtWidgets import (
     QComboBox,
     QFrame,
     QGridLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
 )
+
+
+def _match_aedt_by_project(aedt_files, oProject):
+    """Match .aedt file to project name when multiple files exist in directory."""
+    if len(aedt_files) == 1:
+        return aedt_files[0]
+    proj_name = ""
+    if oProject:
+        try:
+            proj_name = oProject.GetName()
+        except Exception:
+            pass
+    if proj_name:
+        for af in aedt_files:
+            base = os.path.splitext(os.path.basename(af))[0]
+            if base == proj_name:
+                return af
+    return aedt_files[0] if aedt_files else None
 
 
 class AEDTSignals(QObject):
@@ -159,29 +180,53 @@ class AEDTPanel(QFrame):
         if index < 0 or not self.oProject:
             return
         design_name = self.design_combo.currentText()
+        print(f"[AEDT] Design selected: {design_name}")
+
+        # Try COM connection first
         try:
             oDesign = self.oProject.SetActiveDesign(design_name)
-        except Exception:
-            return
+        except Exception as e:
+            print(f"[AEDT] SetActiveDesign failed: {e}")
+
+        # Auto-detect variables from .aedt file
+        aedt_path = ""
+        if self.oProject:
+            try:
+                aedt_path = self.oProject.GetPath()
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"获取项目路径失败: {e}")
+
+        # Ensure aedt_path points to .aedt file, not directory
+        if aedt_path and os.path.isdir(aedt_path):
+            import glob as g
+            aedt_files = g.glob(os.path.join(aedt_path, "*.aedt"))
+            matched_file = _match_aedt_by_project(aedt_files, self.oProject)
+            if matched_file:
+                aedt_path = matched_file
+            else:
+                QMessageBox.warning(self, "调试",
+                    f"目录 {aedt_path} 中未找到 .aedt 文件")
 
         detected_vars = []
         detected_outputs = []
-        try:
-            aedt_path = self.oProject.GetPath()
-            from huds_app.utils.aedt_parser import parse_aedt_variables, parse_aedt_outputs
-            detected_vars = parse_aedt_variables(aedt_path, design_name)
-            detected_outputs = parse_aedt_outputs(aedt_path, design_name)
-        except Exception as e:
-            print(f"[AEDT] Detection failed: {e}")
+        if aedt_path:
+            try:
+                from huds_app.utils.aedt_parser import parse_aedt_variables, parse_aedt_outputs
+                detected_vars = parse_aedt_variables(aedt_path, design_name)
+                detected_outputs = parse_aedt_outputs(aedt_path, design_name)
+                QMessageBox.information(self, "检测结果",
+                    f"检测到 {len(detected_vars)} 个变量: {[v['name'] for v in detected_vars]}\n"
+                    f"检测到 {len(detected_outputs)} 个输出: {[o['name'] for o in detected_outputs]}")
+            except Exception as e:
+                import traceback
+                QMessageBox.critical(self, "解析错误",
+                    f"变量/输出检测失败:\n{str(e)}\n\n{traceback.format_exc()[:500]}")
+        else:
+            QMessageBox.warning(self, "调试",
+                f"未找到 .aedt 路径\nhas_project={self.oProject is not None}")
 
         self._detected_vars = detected_vars
         self._detected_outputs = detected_outputs
-        print(f"[AEDT] Detected {len(detected_vars)} variables:")
-        for v in detected_vars:
-            print(f"  {v['name']}: default={v.get('default', 'N/A')}")
-        print(f"[AEDT] Detected {len(detected_outputs)} outputs:")
-        for o in detected_outputs:
-            print(f"  {o['name']} ({o.get('type', 'N/A')})")
 
     def get_detected_variables(self):
         return self._detected_vars

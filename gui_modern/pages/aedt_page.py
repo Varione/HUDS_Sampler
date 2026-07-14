@@ -1,3 +1,5 @@
+import os
+
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -7,9 +9,26 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QComboBox,
 )
+def _match_aedt_by_project(aedt_files, oProject):
+    """Match .aedt file to project name when multiple files exist in directory."""
+    if len(aedt_files) == 1:
+        return aedt_files[0]
+    proj_name = ""
+    if oProject:
+        try:
+            proj_name = oProject.GetName()
+        except Exception:
+            pass
+    if proj_name:
+        for af in aedt_files:
+            base = os.path.splitext(os.path.basename(af))[0]
+            if base == proj_name:
+                return af
+    return aedt_files[0] if aedt_files else None
 
 
 class AEDTPage(QWidget):
@@ -195,29 +214,57 @@ class AEDTPage(QWidget):
             pass
 
     def _on_design_selected(self, row):
-        if self.design_list.count() > 0:
-            self._design_name = self.design_list.item(row).text()
+        if row < 0:
+            return
+        design_name = self.design_list.item(row).text()
+        print(f"[AEDT] Design selected: {design_name}")
+
+        # Try COM connection first
+        if self._oProject:
+            try:
+                oDesign = self._oProject.SetActiveDesign(design_name)
+            except Exception as e:
+                print(f"[AEDT] SetActiveDesign failed: {e}")
+
+        # Auto-detect variables from .aedt file
+        aedt_path = getattr(self, "_aedt_file_path", "") or ""
+        if not aedt_path and self._oProject:
+            try:
+                aedt_path = self._oProject.GetPath()
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"获取项目路径失败: {e}")
+
+        # Ensure aedt_path points to .aedt file, not directory
+        if aedt_path and os.path.isdir(aedt_path):
+            import glob as g
+            aedt_files = g.glob(os.path.join(aedt_path, "*.aedt"))
+            matched_file = _match_aedt_by_project(aedt_files, self._oProject)
+            if matched_file:
+                aedt_path = matched_file
+            else:
+                QMessageBox.warning(self, "调试",
+                    f"目录 {aedt_path} 中未找到 .aedt 文件")
 
         detected_vars = []
         detected_outputs = []
-        if self._oProject:
+        if aedt_path:
             try:
-                oDesign = self._oProject.SetActiveDesign(self._design_name)
-                aedt_path = self._oProject.GetPath()
                 from huds_app.utils.aedt_parser import parse_aedt_variables, parse_aedt_outputs
-                detected_vars = parse_aedt_variables(aedt_path, self._design_name)
-                detected_outputs = parse_aedt_outputs(aedt_path, self._design_name)
+                detected_vars = parse_aedt_variables(aedt_path, design_name)
+                detected_outputs = parse_aedt_outputs(aedt_path, design_name)
+                QMessageBox.information(self, "检测结果",
+                    f"检测到 {len(detected_vars)} 个变量: {[v['name'] for v in detected_vars]}\n"
+                    f"检测到 {len(detected_outputs)} 个输出: {[o['name'] for o in detected_outputs]}")
             except Exception as e:
-                print(f"[AEDT] Detection failed: {e}")
+                import traceback
+                QMessageBox.critical(self, "解析错误",
+                    f"变量/输出检测失败:\n{str(e)}\n\n{traceback.format_exc()[:500]}")
+        else:
+            QMessageBox.warning(self, "调试",
+                f"未找到 .aedt 路径\nfile_path={getattr(self, '_aedt_file_path', 'NOT SET')}\nhas_project={self._oProject is not None}")
 
         self._detected_vars = detected_vars
         self._detected_outputs = detected_outputs
-        print(f"[AEDT] Detected {len(detected_vars)} variables:")
-        for v in detected_vars:
-            print(f"  {v['name']}: default={v.get('default', 'N/A')}")
-        print(f"[AEDT] Detected {len(detected_outputs)} outputs:")
-        for o in detected_outputs:
-            print(f"  {o['name']} ({o.get('type', 'N/A')})")
 
     def get_detected_variables(self):
         return getattr(self, '_detected_vars', [])

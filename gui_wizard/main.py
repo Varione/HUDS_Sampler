@@ -1,7 +1,12 @@
 import sys
 import os
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Handle PyInstaller packaging
+if getattr(sys, 'frozen', False):
+    PROJECT_ROOT = os.path.dirname(sys.executable)
+else:
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 sys.path.insert(0, PROJECT_ROOT)
 os.environ["ANSYSLMD_LICENSE_FILE"] = "24500@licensing.hkust.edu.cn"
 

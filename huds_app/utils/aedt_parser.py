@@ -1,6 +1,24 @@
 import re
 
 
+def _resolve_aedt_file(aedt_path):
+    """Resolve directory to .aedt file, matching by name if multiple exist."""
+    import os
+    if not os.path.isdir(aedt_path):
+        return aedt_path
+    aedt_files = [f for f in os.listdir(aedt_path) if f.endswith('.aedt')]
+    if not aedt_files:
+        return None
+    if len(aedt_files) == 1:
+        return os.path.join(aedt_path, aedt_files[0])
+    # Match by directory name
+    dir_name = os.path.basename(os.path.normpath(aedt_path))
+    for f in aedt_files:
+        if f.startswith(dir_name):
+            return os.path.join(aedt_path, f)
+    return os.path.join(aedt_path, aedt_files[0])
+
+
 def parse_aedt_designs(aedt_path):
     """Parse .aedt file to extract design names from DefInfo section.
     
@@ -11,22 +29,17 @@ def parse_aedt_designs(aedt_path):
         List of design name strings
     """
     import os
-    
-    if os.path.isdir(aedt_path):
-        aedt_files = [f for f in os.listdir(aedt_path) if f.endswith('.aedt')]
-        if not aedt_files:
-            return []
-        aedt_file = os.path.join(aedt_path, aedt_files[0])
-    else:
-        aedt_file = aedt_path
-    
-    if not os.path.exists(aedt_file):
+
+    aedt_file = _resolve_aedt_file(aedt_path)
+    if not aedt_file:
         return []
-    
+
     try:
         with open(aedt_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-    except Exception:
+        print(f"[AEDT] parse_designs: Read {len(lines)} lines from {aedt_file}")
+    except Exception as e:
+        print(f"[AEDT] Failed to read file: {e}")
         return []
     
     designs = []
@@ -50,7 +63,30 @@ def parse_aedt_designs(aedt_path):
             if match:
                 designs.append(match.group(1))
     
+    print(f"[AEDT] parse_designs: Found {len(designs)} designs")
     return list(dict.fromkeys(designs))  # Deduplicate preserving order
+
+
+def _parse_all_model_designs(lines):
+    """Extract design names from Maxwell3DModel blocks (first Name= inside each block)."""
+    designs = []
+    in_model = False
+    found_name = False
+    for line in lines:
+        stripped = line.strip()
+        if "$begin 'Maxwell3DModel'" in stripped:
+            in_model = True
+            found_name = False
+            continue
+        if "$end 'Maxwell3DModel'" in stripped:
+            in_model = False
+            continue
+        if in_model and not found_name:
+            match = re.match(r"Name='([^']+)'", stripped)
+            if match:
+                designs.append(match.group(1))
+                found_name = True
+    return designs
 
 
 def parse_aedt_variables(aedt_path, design_name):
@@ -64,24 +100,19 @@ def parse_aedt_variables(aedt_path, design_name):
         List of dicts with keys: name, default, unit
     """
     import os
-    
-    if os.path.isdir(aedt_path):
-        aedt_files = [f for f in os.listdir(aedt_path) if f.endswith('.aedt')]
-        if not aedt_files:
-            return []
-        aedt_file = os.path.join(aedt_path, aedt_files[0])
-    else:
-        aedt_file = aedt_path
-    
-    if not os.path.exists(aedt_file):
+
+    aedt_file = _resolve_aedt_file(aedt_path)
+    if not aedt_file:
         return []
-    
+
     try:
         with open(aedt_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-    except Exception:
+        print(f"[AEDT] parse_variables for '{design_name}': Read {len(lines)} lines from {aedt_file}")
+    except Exception as e:
+        print(f"[AEDT] Failed to read file: {e}")
         return []
-    
+
     current_design = None
     in_properties = False
     variables = []
@@ -131,6 +162,15 @@ def parse_aedt_variables(aedt_path, design_name):
             seen.add(v['name'])
             unique_vars.append(v)
     
+    # Fallback: if exact match yielded nothing, use first available design
+    if not unique_vars:
+        all_designs = _parse_all_model_designs(lines)
+        if all_designs:
+            fallback_name = all_designs[0]
+            print(f"[AEDT] parse_variables: exact match for '{design_name}' yielded 0 results, falling back to '{fallback_name}'")
+            return parse_aedt_variables(aedt_path, fallback_name)
+    
+    print(f"[AEDT] parse_variables: Found {len(unique_vars)} variables for '{design_name}'")
     return unique_vars
 
 
@@ -145,22 +185,17 @@ def parse_aedt_outputs(aedt_path, design_name):
         List of dicts with keys: name, type (e.g., 'Force', 'Torque')
     """
     import os
-    
-    if os.path.isdir(aedt_path):
-        aedt_files = [f for f in os.listdir(aedt_path) if f.endswith('.aedt')]
-        if not aedt_files:
-            return []
-        aedt_file = os.path.join(aedt_path, aedt_files[0])
-    else:
-        aedt_file = aedt_path
-    
-    if not os.path.exists(aedt_file):
+
+    aedt_file = _resolve_aedt_file(aedt_path)
+    if not aedt_file:
         return []
-    
+
     try:
         with open(aedt_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-    except Exception:
+        print(f"[AEDT] parse_outputs for '{design_name}': Read {len(lines)} lines from {aedt_file}")
+    except Exception as e:
+        print(f"[AEDT] Failed to read file: {e}")
         return []
     
     current_design = None
@@ -240,6 +275,15 @@ def parse_aedt_outputs(aedt_path, design_name):
             seen.add(o['name'])
             unique_outputs.append(o)
     
+    # Fallback: if exact match yielded nothing, use first available design
+    if not unique_outputs:
+        all_designs = _parse_all_model_designs(lines)
+        if all_designs:
+            fallback_name = all_designs[0]
+            print(f"[AEDT] parse_outputs: exact match for '{design_name}' yielded 0 results, falling back to '{fallback_name}'")
+            return parse_aedt_outputs(aedt_path, fallback_name)
+    
+    print(f"[AEDT] parse_outputs: Found {len(unique_outputs)} outputs for '{design_name}'")
     return unique_outputs
 
 
