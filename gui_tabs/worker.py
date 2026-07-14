@@ -24,6 +24,7 @@ class HUDSWorker:
         self.aedt_path = aedt_path
         self.design_name = design_name
         self.abort = False
+        self.r2_history = []
         self.signals = HUDSWorkerSignals()
 
     def _log(self, message):
@@ -46,12 +47,12 @@ class HUDSWorker:
             time.sleep(0.5)
 
             self._log("Initializing run...")
-            init_run(config_path, self.run_dir)
+            init_run(config_path, self.run_dir, overwrite=True)
             self._log("Run initialized.")
 
             cfg = load_config(config_path)
             max_steps = cfg.training.max_steps
-            r2_history = []
+            self.r2_history = []
 
             for step in range(1, max_steps + 1):
                 if self.abort:
@@ -79,7 +80,7 @@ class HUDSWorker:
                     return
 
                 force_csv = self._run_maxwell_sweep(
-                    request_path, config_path, self.aedt_path, self.design_name, step, run_dir
+                    request_path, config_path, self.aedt_path, self.design_name, step, self.run_dir
                 )
 
                 if self.abort:
@@ -115,7 +116,7 @@ class HUDSWorker:
 
                 metrics = train_model(self.run_dir, cfg, progress_cb=progress_cb)
                 r2 = metrics.get("val_r2_avg", float("nan"))
-                r2_history.append(r2)
+                self.r2_history.append(r2)
                 self.signals.r2_signal.emit(r2)
                 self._log(f"  Training complete: val_r2_avg = {r2}")
 
@@ -167,6 +168,7 @@ class HUDSWorker:
 
     def _extract_labels(self, force_csv, step, run_dir, cfg):
         import pandas as pd
+        import re
         from huds_app.core.storage import read_csv, write_csv
         from huds_app.data.schema import SAMPLE_ID_COLUMN
 
@@ -176,48 +178,82 @@ class HUDSWorker:
         df = pd.read_csv(force_csv)
         request_df = read_csv(request_path)
 
-        var_name = cfg.variables[0].name if cfg.variables else "v"
+        var_names = [v.name for v in cfg.variables] if cfg.variables else []
         steady_pct = getattr(cfg, "steady_state_pct", 0.2)
 
+        kv_pattern = re.compile(r"(\w+)='([^']+)'")
+
+        def parse_col_vars(col_name):
+            matches = kv_pattern.findall(col_name)
+            result = {}
+            for k, v in matches:
+                clean = v.replace("km_per_hour", "").replace("Hz", "").replace("A", "")
+                try:
+                    result[k] = float(clean)
+                except ValueError:
+                    result[k] = clean
+            return result
+
         detected_outputs = set()
+        col_var_map = {}
         for col in df.columns[1:]:
-            if f"{var_name}='" not in col:
+            vars_in_col = parse_col_vars(col)
+            if not vars_in_col:
                 continue
-            prefix = col.rsplit(f" - {var_name}='", 1)[0]
-            detected_outputs.add(prefix)
+            prefix = col.rsplit(" - ", 1)[0] if " - " in col else col.split("[")[0].strip()
+            clean_prefix = re.sub(r'\s*\[.*?\]', '', prefix).strip()
+            detected_outputs.add(clean_prefix)
+            col_var_map[col] = (clean_prefix, vars_in_col)
 
         out_names = sorted(detected_outputs) if detected_outputs else ["peak_force_y", "peak_force_z"]
         self._log(f"  Detected outputs: {out_names}")
 
-        force_data = []
-        for col in df.columns[1:]:
-            if f"{var_name}='" not in col:
-                continue
-            v_str = col.split(f"{var_name}='")[1].split("'")[0]
-            v_val = float(v_str.replace("km_per_hour", ""))
+        label_rows = []
+        for _, req_row in request_df.iterrows():
+            req_vals = {}
+            for vn in var_names:
+                if vn in req_row.index:
+                    raw = str(req_row[vn]).replace("km_per_hour", "").replace("Hz", "").replace("A", "")
+                    try:
+                        req_vals[vn] = float(raw)
+                    except ValueError:
+                        req_vals[vn] = raw
 
-            n_total = len(df[col])
-            n_steady = max(1, int(n_total * steady_pct))
-            steady_mean = df[col].iloc[-n_steady:].mean()
+            row_data = {SAMPLE_ID_COLUMN: req_row[SAMPLE_ID_COLUMN]}
+            for vn in var_names:
+                if vn in req_row.index:
+                    row_data[vn] = req_row[vn]
 
-            prefix = col.rsplit(f" - {var_name}='", 1)[0]
-            force_data.append({
-                "v_rounded": round(v_val, 4),
-                "value": steady_mean,
-                "output_name": prefix,
-            })
+            matched_outputs = {}
+            for col, (clean_prefix, vars_in_col) in col_var_map.items():
+                match = True
+                for vn in var_names:
+                    if vn not in vars_in_col or vn not in req_vals:
+                        match = False
+                        break
+                    if isinstance(vars_in_col[vn], float) and isinstance(req_vals[vn], float):
+                        if abs(vars_in_col[vn] - req_vals[vn]) > 1e-6:
+                            match = False
+                    else:
+                        if str(vars_in_col[vn]) != str(req_vals[vn]):
+                            match = False
 
-        if not force_data:
+                if not match:
+                    continue
+
+                n_total = len(df[col])
+                n_steady = max(1, int(n_total * steady_pct))
+                steady_mean = df[col].iloc[-n_steady:].mean()
+                matched_outputs[clean_prefix] = steady_mean
+
+            row_data.update(matched_outputs)
+            label_rows.append(row_data)
+
+        if not label_rows:
             raise RuntimeError("Could not extract data from simulation output")
 
-        force_df = pd.DataFrame(force_data)
-        pivoted = force_df.pivot(index="v_rounded", columns="output_name", values="value").reset_index()
-
-        merged = request_df.copy()
-        merged["v_rounded"] = merged[var_name].round(4)
-        merged = merged.merge(pivoted, on="v_rounded", how="left")
-        merged = merged.drop(columns=["v_rounded"])
-
+        merged = pd.DataFrame(label_rows)
+        cols = [SAMPLE_ID_COLUMN] + var_names + out_names
         label_path = os.path.join(run_dir, "data", f"step{step}_labels.csv")
-        write_csv(merged[[SAMPLE_ID_COLUMN, var_name] + out_names], label_path)
+        write_csv(merged[cols], label_path)
         return label_path, out_names

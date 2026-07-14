@@ -267,11 +267,14 @@ class ConfigPage(QWidget):
                 max_str = max_item.text() if max_item else ""
                 min_num, _ = parse_value_with_unit(min_str)
                 max_num, _ = parse_value_with_unit(max_str)
-                
+
+                if min_num is None or max_num is None:
+                    continue
+
                 selected_vars.append({
                     "name": name_item.text() if name_item else "",
-                    "min": float(min_num) if min_num is not None else 0.0,
-                    "max": float(max_num) if max_num is not None else 1.0,
+                    "min": float(min_num),
+                    "max": float(max_num),
                     "sample_points": 60,
                     "unit": unit_item.text() if unit_item else "",
                 })

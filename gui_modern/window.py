@@ -79,8 +79,8 @@ class HUDSModernWindow(QMainWindow):
             
             detected_outputs = self.aedt_page.get_detected_outputs()
             if detected_outputs:
-                self.config_page._auto_fill_outputs()
                 self.setProperty("detected_outputs", detected_outputs)
+                self.config_page._auto_fill_outputs()
 
 
 class SidebarTitle(QWidget):

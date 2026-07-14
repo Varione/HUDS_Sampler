@@ -217,6 +217,7 @@ class AEDTPage(QWidget):
         if row < 0:
             return
         design_name = self.design_list.item(row).text()
+        self._design_name = design_name
         print(f"[AEDT] Design selected: {design_name}")
 
         # Try COM connection first

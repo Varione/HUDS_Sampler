@@ -39,9 +39,19 @@ class HUDSWorker(QThread):
         from huds_app.sampling.huds import run_huds_sampling
         from huds_app.data.validation import import_labels as il
         from huds_app.model.train import train_model
-        from huds_app.interface.workflow import show_status
+        from huds_app.interface.workflow import init_run, show_status
 
         config_path = os.path.join(self.run_dir, "config.json")
+
+        self.log("Initializing run...")
+        result = init_run(config_path, self.run_dir, overwrite=True)
+        self.log(f"Run initialized, candidate pool size: {result['total_candidates']}")
+
+        try:
+            show_status(self.run_dir)
+        except Exception:
+            pass
+
         cfg = load_config(config_path)
         max_steps = cfg.training.max_steps
 

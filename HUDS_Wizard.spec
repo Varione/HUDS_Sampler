@@ -5,7 +5,7 @@ block_cipher = None
 import os
 import sys
 # Use parent of script path (spec file location)
-SRC_DIR = r'E:\大型数据库构建\HUDS'
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 a = Analysis(
     [os.path.join(SRC_DIR, 'gui_wizard', 'main.py')],

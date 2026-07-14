@@ -96,6 +96,10 @@ class MonitorPanel(QFrame):
         self._worker.signals.step_signal.connect(self._on_step)
         self._worker.signals.r2_signal.connect(self._on_r2)
         self._worker.signals.finished_signal.connect(self._on_finished)
+
+        main_window = self.window()
+        if hasattr(main_window, "result_panel"):
+            self._worker.signals.r2_signal.connect(main_window.result_panel.update_r2)
         self._thread.finished.connect(self._on_thread_finished)
 
         self.start_btn.setEnabled(False)
@@ -123,6 +127,10 @@ class MonitorPanel(QFrame):
         import math
         if not math.isnan(r2):
             self.log_browser.append(f"  R2 signal: {r2:.4f}")
+
+        main_window = self.window()
+        if hasattr(main_window, "result_panel"):
+            main_window.result_panel.update_r2(r2)
 
     def _on_finished(self, success, message):
         self.start_btn.setEnabled(True)

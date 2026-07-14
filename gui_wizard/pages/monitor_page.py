@@ -1,6 +1,4 @@
-import json
 import os
-import time
 from PyQt5.QtWidgets import (
     QWizardPage,
     QVBoxLayout,
@@ -79,16 +77,8 @@ class MonitorPage(QWizardPage):
 
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
-        time.sleep(1)
 
         self.log_browser.append(f"配置已保存到: {config_path}")
-
-        from huds_app.interface.workflow import init_run
-        result = init_run(config_path, run_dir)
-        self.log_browser.append(f"初始化完成，候选池大小: {result['total_candidates']}")
-
-        from huds_app.interface.workflow import show_status
-        show_status(run_dir)
 
         self._worker = HUDSWorker(config, run_dir, aedt_path, design_name)
         self._worker.progress_signal.connect(self.progress_bar.setValue)
@@ -116,9 +106,6 @@ class MonitorPage(QWizardPage):
         self.start_btn.setEnabled(True)
         self.abort_btn.setEnabled(False)
         self.log_browser.append(f"\n训练{'成功' if success else '失败'}: {message}")
-        if success:
-            wizard = self.window()
-            wizard.done(wizard.NextButton | wizard.FinishButton)
 
     def set_next_id(self, nid):
         self._next_id = nid

@@ -28,7 +28,7 @@ from huds_app.model.train import apply_normalization, load_normalization
 
 def init_run(config_path: str | Path, run_dir: str | Path, snap_to_levels: bool = False, overwrite: bool = False) -> dict[str, Any]:
     config = load_config(str(config_path))
-    run_path = ensure_run_dir(str(run_dir))
+    run_path = Path(run_dir)
 
     if run_path.exists() and any(run_path.iterdir()):
         if not overwrite:
@@ -36,6 +36,8 @@ def init_run(config_path: str | Path, run_dir: str | Path, snap_to_levels: bool 
                 f"Run directory is not empty: {run_path}. "
                 "Use overwrite=True to replace existing data."
             )
+
+    run_path = ensure_run_dir(str(run_path))
 
     dst = run_path / "config.json"
     if Path(config_path).resolve() != dst.resolve():
@@ -122,6 +124,8 @@ def validate_files(run_dir: str | Path) -> List[str]:
     if config is None:
         return errors
 
+    datasets_dir = run_path / "datasets"
+
     pool_specs = [
         (run_path / "candidate_pool.csv", candidate_pool, _request_columns(config)),
     ]
@@ -140,7 +144,6 @@ def validate_files(run_dir: str | Path) -> List[str]:
         (datasets_dir / "val_labeled.csv", valid_ids_by_file.get(run_path / "candidate_pool.csv", set())),
         (datasets_dir / "test_labeled.csv", valid_ids_by_file.get(run_path / "candidate_pool.csv", set())),
     ]
-    datasets_dir = run_path / "datasets"
     for path, valid_ids in labeled_specs:
         if not path.exists():
             continue
