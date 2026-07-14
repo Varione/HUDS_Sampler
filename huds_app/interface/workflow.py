@@ -30,6 +30,11 @@ def init_run(config_path: str | Path, run_dir: str | Path, snap_to_levels: bool 
     config = load_config(str(config_path))
     run_path = Path(run_dir)
 
+    config_in_run_dir = Path(config_path).resolve() == (Path(run_dir) / "config.json").resolve()
+    saved_config = None
+    if config_in_run_dir and run_path.exists():
+        saved_config = Path(config_path).read_bytes()
+
     if run_path.exists() and any(run_path.iterdir()):
         if not overwrite:
             raise FileExistsError(
@@ -41,7 +46,9 @@ def init_run(config_path: str | Path, run_dir: str | Path, snap_to_levels: bool 
     run_path = ensure_run_dir(str(run_path))
 
     dst = run_path / "config.json"
-    if Path(config_path).resolve() != dst.resolve():
+    if saved_config is not None:
+        dst.write_bytes(saved_config)
+    elif Path(config_path).resolve() != dst.resolve():
         shutil.copy2(config_path, dst)
 
     pool_df = create_candidate_pool(config, snap_to_levels=snap_to_levels)
