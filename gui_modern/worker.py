@@ -61,7 +61,7 @@ class HUDSWorker(QThread):
             for step in range(1, max_steps + 1):
                 if self._abort:
                     self._log("Workflow aborted by user")
-                    self.finished_all_signal.emit([])
+                    self.error_signal.emit("Aborted by user")
                     return
 
                 self._log(f"{'='*40}")

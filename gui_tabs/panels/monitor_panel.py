@@ -96,10 +96,6 @@ class MonitorPanel(QFrame):
         self._worker.signals.step_signal.connect(self._on_step)
         self._worker.signals.r2_signal.connect(self._on_r2)
         self._worker.signals.finished_signal.connect(self._on_finished)
-
-        main_window = self.window()
-        if hasattr(main_window, "result_panel"):
-            self._worker.signals.r2_signal.connect(main_window.result_panel.update_r2)
         self._thread.finished.connect(self._on_thread_finished)
 
         self.start_btn.setEnabled(False)

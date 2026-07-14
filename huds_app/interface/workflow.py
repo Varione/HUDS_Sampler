@@ -36,6 +36,7 @@ def init_run(config_path: str | Path, run_dir: str | Path, snap_to_levels: bool 
                 f"Run directory is not empty: {run_path}. "
                 "Use overwrite=True to replace existing data."
             )
+        shutil.rmtree(str(run_path))
 
     run_path = ensure_run_dir(str(run_path))
 
